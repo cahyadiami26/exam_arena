@@ -255,9 +255,11 @@ $avatarUrl = app_avatar_url();
     <title><?= $view === 'modules' ? 'Modul Asesmen' : 'Paket Tes' ?> · Assessment Studio LJU</title>
     <link rel="stylesheet" href="../assets/app.css?v=1">
     <link rel="stylesheet" href="../assets/assessment-builder.css?v=1">
+    <link rel="stylesheet" href="../assets/portal-ui.css?v=1">
     <script src="../assets/assessment-builder.js?v=1" defer></script>
+    <script src="../assets/portal-ui.js?v=1" defer></script>
 </head>
-<body class="assessment-builder-page">
+<body class="assessment-builder-page has-portal-sidebar">
 <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="ab-cube" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="M3 8v8l9 5 9-5V8M12 13v8"/></symbol>
     <symbol id="ab-stack" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></symbol>
@@ -272,6 +274,7 @@ $avatarUrl = app_avatar_url();
     <symbol id="ab-shuffle" viewBox="0 0 24 24"><path d="m18 14 4 4-4 4M18 2l4 4-4 4M2 18h2.5a6 6 0 0 0 4.2-1.7l6.6-6.6A6 6 0 0 1 19.5 8H22M2 6h2.5a6 6 0 0 1 4.2 1.7l1.2 1.2M14 14l1.3 1.3a6 6 0 0 0 4.2 1.7H22"/></symbol>
     <symbol id="ab-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
 </svg>
+<?php $portalNavBase = '../'; $portalNavActive = 'builder'; require dirname(__DIR__, 2) . '/app/portal_sidebar.php'; ?>
 <header class="ab-topbar">
     <a class="ab-brand" href="../index.php"><span class="ab-brand-mark"><img src="https://dms.lju.co.id/assets/img/logo.png" alt="" data-brand-logo><span class="ab-brand-fallback">LJU</span></span><span><strong>E-ASSESSMENT</strong><small>PT Lampung Jasa Utama</small></span></a>
     <nav class="ab-top-nav"><a href="../index.php">Dashboard</a><a href="question_bank.php">Bank soal</a><span>Assessment Studio</span></nav>

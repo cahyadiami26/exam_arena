@@ -221,9 +221,11 @@ function exam_render_option_image(int $attemptId, array $option): void
     <title><?= $attempt ? e($attempt['schedule_name']) : 'Ruang Ujian' ?> · E-Assessment LJU</title>
     <link rel="stylesheet" href="assets/app.css?v=1">
     <link rel="stylesheet" href="assets/exam.css?v=1">
+    <link rel="stylesheet" href="assets/portal-ui.css?v=1">
+    <script src="assets/portal-ui.js?v=1" defer></script>
     <?php if ($attempt && !$pageError): ?><script src="assets/exam.js?v=1" defer></script><?php endif; ?>
 </head>
-<body class="exam-page">
+<body class="exam-page has-portal-sidebar">
 <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="x-icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="x-icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
@@ -243,6 +245,7 @@ function exam_render_option_image(int $attemptId, array $option): void
     <symbol id="x-icon-italic" viewBox="0 0 24 24"><path d="M19 4h-9M14 20H5M15 4 9 20"/></symbol>
     <symbol id="x-icon-list-ul" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
 </svg>
+<?php $portalNavBase = ''; $portalNavActive = 'exam'; require dirname(__DIR__) . '/app/portal_sidebar.php'; ?>
 
 <?php if ($pageError): ?>
     <main class="exam-error-page"><section class="exam-error-card"><span class="exam-error-icon"><svg class="icon"><use href="#x-icon-warning"></use></svg></span><h1>Ruang ujian tidak tersedia</h1><p><?= e($pageError) ?></p><a class="button exam-primary-button" href="lobby.php">Kembali ke Lobby Ujian</a></section></main>

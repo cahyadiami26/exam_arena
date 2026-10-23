@@ -337,9 +337,11 @@ $displayName = (string) ($user['name'] ?? 'Pengguna');
     <title>Jadwal & Undangan · E-Assessment LJU</title>
     <link rel="stylesheet" href="../assets/assessment-builder.css?v=1">
     <link rel="stylesheet" href="../assets/schedules.css?v=1">
+    <link rel="stylesheet" href="../assets/portal-ui.css?v=1">
     <script src="../assets/schedules.js?v=1" defer></script>
+    <script src="../assets/portal-ui.js?v=1" defer></script>
 </head>
-<body class="assessment-builder-page schedule-page">
+<body class="assessment-builder-page schedule-page has-portal-sidebar">
 <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="sch-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01"/></symbol>
     <symbol id="sch-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM20 8a3 3 0 0 1-2 2.83M20 21v-2a4 4 0 0 0-3-3.87"/></symbol>
@@ -352,6 +354,7 @@ $displayName = (string) ($user['name'] ?? 'Pengguna');
     <symbol id="sch-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
     <symbol id="sch-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
 </svg>
+<?php $portalNavBase = '../'; $portalNavActive = 'schedules'; require dirname(__DIR__, 2) . '/app/portal_sidebar.php'; ?>
 <header class="ab-topbar">
     <a class="ab-brand" href="../index.php" aria-label="Kembali ke dashboard HR">
         <span class="ab-brand-mark"><img src="../assets/logo-lju.svg" alt="" onerror="this.parentElement.classList.add('logo-failed')"><b class="ab-brand-fallback">LJU</b></span>
