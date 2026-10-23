@@ -79,6 +79,65 @@ function report_page_package_type(string $type): string
     };
 }
 
+function report_page_review_type_label(string $type): string
+{
+    return match ($type) {
+        'essay' => 'Esai',
+        'practical' => 'Praktik',
+        'psychometric' => 'Psikometrik',
+        'papi' => 'PAPI Kostick',
+        'review_360' => 'Review 360°',
+        'overall' => 'Review keseluruhan',
+        default => 'Review HR',
+    };
+}
+
+function report_page_review_status_label(string $status): string
+{
+    return match ($status) {
+        'completed' => 'Selesai',
+        'in_progress' => 'Dalam proses',
+        'pending' => 'Menunggu review',
+        'not_created' => 'Belum ada review',
+        default => 'Status tidak diketahui',
+    };
+}
+
+function report_page_recommendation_label(?string $recommendation): string
+{
+    return match ($recommendation) {
+        'recommended' => 'Direkomendasikan',
+        'consider' => 'Dipertimbangkan',
+        'not_recommended' => 'Tidak direkomendasikan',
+        default => '—',
+    };
+}
+
+function report_page_response_text(array $answer): string
+{
+    $parts = [];
+    $plainText = trim(html_entity_decode(strip_tags((string) ($answer['answer_text'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    if ($plainText !== '') {
+        $parts[] = $plainText;
+    }
+    foreach (($answer['selected_options'] ?? []) as $option) {
+        if (!is_array($option)) {
+            continue;
+        }
+        $optionText = trim((string) ($option['option_text'] ?? ''));
+        if ($optionText !== '') {
+            $parts[] = trim((string) ($option['label'] ?? 'Dipilih')) . ': ' . $optionText;
+        }
+    }
+    foreach (($answer['files'] ?? []) as $file) {
+        if (is_array($file) && trim((string) ($file['original_file_name'] ?? '')) !== '') {
+            $parts[] = 'File: ' . (string) $file['original_file_name'];
+        }
+    }
+
+    return $parts === [] ? '—' : implode("\n", $parts);
+}
+
 function report_page_csv_number(mixed $value): string
 {
     return $value === null ? '' : number_format((float) $value, 2, '.', '');
@@ -204,8 +263,15 @@ try {
     if ($isHr) {
         $schedules = assessment_report_schedule_options();
         $summary = assessment_report_aggregate($filters, true);
-        $attemptRows = assessment_report_hr_attempts($filters, 500);
+        $attemptRows = assessment_report_hr_complete_attempts($filters, 500);
         $papiProfiles = assessment_report_hr_papi_profiles($filters, 50);
+        $papiReviewSummaries = assessment_report_hr_papi_review_summaries(array_column($papiProfiles, 'attempt_id'));
+        foreach ($papiProfiles as &$profile) {
+            $attemptId = (int) $profile['attempt_id'];
+            $profile['chart_svg'] = assessment_papi_profile_svg($profile['scores']);
+            $profile['reviews'] = isset($papiReviewSummaries[$attemptId]) ? [$papiReviewSummaries[$attemptId]] : [];
+        }
+        unset($profile);
     } else {
         $summary = assessment_report_aggregate($filters, false);
         $managementPackages = assessment_report_management_packages($filters);
@@ -248,7 +314,7 @@ $papiReportExportUrl = 'reports.php?' . http_build_query([
     <meta name="theme-color" content="#f5f7fb">
     <title>Laporan &amp; Hasil · E-Assessment LJU</title>
     <link rel="stylesheet" href="assets/assessment-builder.css?v=1">
-    <link rel="stylesheet" href="assets/reports.css?v=1">
+    <link rel="stylesheet" href="assets/reports.css?v=2">
     <link rel="stylesheet" href="assets/portal-ui.css?v=1">
     <script src="assets/portal-ui.js?v=1" defer></script>
 </head>
@@ -304,7 +370,7 @@ $papiReportExportUrl = 'reports.php?' . http_build_query([
                 <label class="ab-field"><span>Status hasil</span><select name="status"><option value="all" <?= $filters['status'] === 'all' ? 'selected' : '' ?>>Semua hasil</option><option value="completed" <?= $filters['status'] === 'completed' ? 'selected' : '' ?>>Selesai</option><option value="pending_review" <?= $filters['status'] === 'pending_review' ? 'selected' : '' ?>>Menunggu review</option></select></label>
             <?php endif; ?>
         </div>
-        <div class="rp-filter-actions"><span>Rentang tanggal memakai waktu pengiriman attempt; untuk attempt tanpa waktu kirim dipakai waktu mulai.</span><div><button class="ab-secondary-button" type="submit"><svg class="icon"><use href="#rp-chart"></use></svg>Terapkan filter</button><?php if ($isHr): ?><button class="ab-primary-button" type="submit" name="export" value="csv"><svg class="icon"><use href="#rp-download"></use></svg>Unduh CSV</button><?php endif; ?><button class="ab-primary-button rp-pdf-button" type="submit" formaction="report_pdf.php" formmethod="get"><svg class="icon"><use href="#rp-pdf"></use></svg>Unduh PDF</button></div></div>
+        <div class="rp-filter-actions"><span>Rentang tanggal memakai waktu pengiriman attempt; untuk attempt tanpa waktu kirim dipakai waktu mulai.</span><div><button class="ab-secondary-button" type="submit"><svg class="icon"><use href="#rp-chart"></use></svg>Terapkan filter</button><?php if ($isHr): ?><button class="ab-primary-button" type="submit" name="export" value="csv"><svg class="icon"><use href="#rp-download"></use></svg>Unduh CSV</button><?php endif; ?><button class="ab-primary-button rp-pdf-button" type="submit" formaction="report_pdf.php" formmethod="get"><svg class="icon"><use href="#rp-pdf"></use></svg><?= $isHr ? 'Unduh PDF lengkap' : 'Unduh PDF' ?></button></div></div>
     </form>
 
     <?php if ($isHr): ?>
@@ -333,6 +399,55 @@ $papiReportExportUrl = 'reports.php?' . http_build_query([
                         <td><span class="rp-result-pill <?= e(report_page_status_class($row)) ?>"><i></i><?= e(report_page_status_label($row)) ?></span></td>
                         <td><?php if ($row['pending_review_count'] > 0): ?><a class="rp-review-link" href="admin/reviews.php?status=open"> <?= (int) $row['pending_review_count'] ?> item · tinjau</a><?php else: ?><span class="rp-readonly">—</span><?php endif; ?></td>
                     </tr>
+                    <tr class="rp-attempt-detail-row"><td colspan="9">
+                        <details class="rp-attempt-details">
+                            <summary><span>Rincian lengkap</span><small><?= count($row['autograde_modules']) ?> modul autograde · <?= count($row['hr_reviews']) ?> kelompok review HR</small></summary>
+                            <div class="rp-detail-grid">
+                                <section class="rp-detail-card">
+                                    <h3>Skor autograde per modul</h3>
+                                    <?php if ($row['autograde_modules'] === []): ?>
+                                        <p class="rp-detail-muted">Tidak ada skor autograde tersimpan untuk attempt ini.</p>
+                                    <?php else: ?>
+                                        <div class="rp-detail-table-scroll"><table class="rp-detail-table"><thead><tr><th>Modul</th><th>Skor</th><th>Item</th><th>Persentase</th></tr></thead><tbody>
+                                            <?php foreach ($row['autograde_modules'] as $moduleScore): ?>
+                                                <tr><td><strong><?= e($moduleScore['module_name']) ?></strong><small><?= e($moduleScore['module_category']) ?></small></td><td><?= e(report_page_score($moduleScore['earned_score'])) ?> / <?= e(report_page_score($moduleScore['possible_score'])) ?></td><td><?= (int) $moduleScore['scored_item_count'] ?></td><td><?= $moduleScore['percentage'] === null ? '—' : e(number_format((float) $moduleScore['percentage'], 1, ',', '.') . '%') ?></td></tr>
+                                            <?php endforeach; ?>
+                                        </tbody></table></div>
+                                    <?php endif; ?>
+                                </section>
+                                <section class="rp-detail-card rp-detail-review-card">
+                                    <h3>Review HR dan hasil penilaian</h3>
+                                    <?php if ($row['hr_reviews'] === []): ?>
+                                        <p class="rp-detail-muted">Belum ada rekaman review HR untuk attempt ini.</p>
+                                    <?php else: ?>
+                                        <div class="rp-review-list">
+                                            <?php foreach ($row['hr_reviews'] as $review): ?>
+                                                <article class="rp-review-card">
+                                                    <div class="rp-review-card-heading"><div><strong><?= e(report_page_review_type_label((string) $review['review_type'])) ?></strong><?php if ($review['subject_name'] !== ''): ?><small>Subjek: <?= e($review['subject_name']) ?></small><?php endif; ?></div><span class="rp-review-status is-<?= e((string) $review['review_status']) ?>"><?= e(report_page_review_status_label((string) $review['review_status'])) ?></span></div>
+                                                    <div class="rp-review-inline-meta"><span>Reviewer: <?= e($review['reviewer_name']) ?></span><span><?= e(report_page_date($review['reviewed_at'])) ?></span></div>
+                                                    <?php if ($review['score'] !== null || $review['recommendation'] !== null): ?><div class="rp-review-quick-stats"><?php if ($review['score'] !== null): ?><span>Skor review <strong><?= e(report_page_score($review['score'])) ?></strong></span><?php endif; ?><?php if ($review['recommendation'] !== null): ?><span>Rekomendasi <strong><?= e(report_page_recommendation_label($review['recommendation'])) ?></strong></span><?php endif; ?></div><?php endif; ?>
+                                                    <?php foreach ([['Kekuatan', $review['strengths']], ['Area pengembangan', $review['development_areas']], ['Catatan internal HR', $review['notes']]] as [$label, $value]): ?>
+                                                        <?php if (trim((string) $value) !== ''): ?><div class="rp-review-text"><strong><?= e($label) ?></strong><p><?= nl2br(e($value)) ?></p></div><?php endif; ?>
+                                                    <?php endforeach; ?>
+                                                    <?php foreach ($review['records'] as $record): ?>
+                                                        <?php $recordResponse = report_page_response_text($record); ?>
+                                                        <?php if (trim((string) $record['question_text']) !== '' || $recordResponse !== '—'): ?>
+                                                            <div class="rp-review-answer"><strong><?= e(trim(strip_tags((string) $record['question_text'])) ?: 'Jawaban peserta') ?></strong><p><?= nl2br(e($recordResponse)) ?></p><?php if ($review['record_count'] > 1 && ($record['score'] !== null || trim((string) $record['notes']) !== '')): ?><small><?= $record['score'] !== null ? 'Skor ' . e(report_page_score($record['score'])) . ' · ' : '' ?><?= e((string) ($record['notes'] ?? '')) ?></small><?php endif; ?></div>
+                                                        <?php endif; ?>
+                                                    <?php endforeach; ?>
+                                                    <?php if ($review['review_type'] === 'review_360' && $review['responses'] !== []): ?>
+                                                        <div class="rp-review-response-list"><strong>Jawaban evaluasi 360°</strong>
+                                                            <?php foreach ($review['responses'] as $response): ?><div class="rp-review-answer"><span><?= e(trim(strip_tags((string) $response['question_text']))) ?></span><p><?= nl2br(e(report_page_response_text($response))) ?></p></div><?php endforeach; ?>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </article>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    <?php endif; ?>
+                                </section>
+                            </div>
+                        </details>
+                    </td></tr>
                 <?php endforeach; ?>
                 </tbody></table></div>
                 <?php if (($summary['attempt_count'] ?? 0) > count($attemptRows)): ?><p class="rp-cap-note">Daftar di layar dibatasi 500 baris. Gunakan ekspor CSV untuk maksimal 5.000 baris atau persempit filter.</p><?php endif; ?>
@@ -340,7 +455,7 @@ $papiReportExportUrl = 'reports.php?' . http_build_query([
         </section>
         <section class="ab-panel rp-papi-report-panel" aria-labelledby="rp-papi-heading">
             <div class="ab-panel-heading rp-papi-panel-heading">
-                <div><span class="ab-kicker">SKOR INSTRUMEN · HR/ADMIN</span><h2 id="rp-papi-heading">Skor mentah PAPI per attempt</h2><p>Skor aspek diambil apa adanya dari jawaban tersimpan (Most +1, Least −1). Laporan tidak menggabungkan skor antar peserta/attempt, menormalisasi, menafsirkan, atau memberi klasifikasi normatif.</p></div>
+                <div><span class="ab-kicker">SKOR INSTRUMEN · HR/ADMIN</span><h2 id="rp-papi-heading">Profil PAPI per attempt</h2><p>Menampilkan skor mentah setiap aspek, spider chart, serta review HR. Grafik memakai skala dinamis bertanda dan bukan norma atau interpretasi psikometri.</p></div>
                 <a class="ab-secondary-button rp-papi-export-button" href="<?= e($papiReportExportUrl) ?>"><svg class="icon"><use href="#rp-download"></use></svg>Unduh CSV PAPI</a>
             </div>
             <?php if ($papiProfiles === []): ?>
@@ -350,10 +465,30 @@ $papiReportExportUrl = 'reports.php?' . http_build_query([
                     <?php foreach ($papiProfiles as $profile): ?>
                         <article class="rp-papi-profile">
                             <div class="rp-papi-profile-heading"><div><strong><?= e($profile['participant_name']) ?></strong><small><?= e($profile['participant_type'] === 'employee' ? 'Karyawan SSO' : 'Kandidat') ?><?= $profile['participant_division'] !== '' ? ' · Bidang ' . e($profile['participant_division']) : '' ?><?= $profile['participant_department'] !== '' ? ' · Divisi ' . e($profile['participant_department']) : '' ?></small><small><?= e($profile['schedule_code']) ?> · <?= e($profile['schedule_name']) ?> · <?= e($profile['package_name']) ?></small></div><span class="rp-attempt-badge">#<?= (int) $profile['attempt_number'] ?> · <?= e(report_page_attempt_status_label($profile['attempt_status'])) ?></span></div>
-                            <div class="rp-papi-aspect-grid">
-                                <?php foreach ($profile['scores'] as $score): ?>
-                                    <div><span><?= e($score['aspect_code']) ?></span><strong><?= e(report_page_score($score['raw_score'])) ?></strong><small><?= e($score['label']) ?> · <?= e($score['group']) ?></small></div>
-                                <?php endforeach; ?>
+                            <div class="rp-papi-profile-body">
+                                <div class="rp-papi-chart-wrap"><?= $profile['chart_svg'] ?></div>
+                                <div class="rp-papi-aspect-grid">
+                                    <?php foreach ($profile['scores'] as $score): ?>
+                                        <div><span><?= e($score['aspect_code']) ?></span><strong><?= e(report_page_score($score['raw_score'])) ?></strong><small><?= e($score['label']) ?> · <?= e($score['group']) ?></small></div>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                            <div class="rp-papi-review-block">
+                                <h3>Review HR PAPI</h3>
+                                <?php if ($profile['reviews'] === []): ?>
+                                    <p class="rp-detail-muted">Belum ada rekaman review HR untuk attempt ini.</p>
+                                <?php else: ?>
+                                    <?php foreach ($profile['reviews'] as $review): ?>
+                                        <div class="rp-review-card">
+                                            <div class="rp-review-card-heading"><strong>Review PAPI Kostick</strong><span class="rp-review-status is-<?= e((string) $review['review_status']) ?>"><?= e(report_page_review_status_label((string) $review['review_status'])) ?></span></div>
+                                            <div class="rp-review-inline-meta"><span>Reviewer: <?= e($review['reviewer_name']) ?></span><span><?= e(report_page_date($review['reviewed_at'])) ?></span></div>
+                                            <?php if ($review['score'] !== null || $review['recommendation'] !== null): ?><div class="rp-review-quick-stats"><?php if ($review['score'] !== null): ?><span>Skor review <strong><?= e(report_page_score($review['score'])) ?></strong></span><?php endif; ?><?php if ($review['recommendation'] !== null): ?><span>Rekomendasi <strong><?= e(report_page_recommendation_label($review['recommendation'])) ?></strong></span><?php endif; ?></div><?php endif; ?>
+                                            <?php foreach ([['Kekuatan', $review['strengths']], ['Area pengembangan', $review['development_areas']], ['Catatan internal HR', $review['notes']]] as [$label, $value]): ?>
+                                                <?php if (trim((string) $value) !== ''): ?><div class="rp-review-text"><strong><?= e($label) ?></strong><p><?= nl2br(e($value)) ?></p></div><?php endif; ?>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
                             </div>
                         </article>
                     <?php endforeach; ?>

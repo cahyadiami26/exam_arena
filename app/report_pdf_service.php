@@ -45,6 +45,176 @@ function assessment_report_pdf_date(?string $value): string
     }
 }
 
+function assessment_report_pdf_review_type_label(string $type): string
+{
+    return match ($type) {
+        'essay' => 'Esai',
+        'practical' => 'Praktik',
+        'psychometric' => 'Psikometrik',
+        'papi' => 'PAPI Kostick',
+        'review_360' => 'Review 360°',
+        'overall' => 'Review keseluruhan',
+        default => 'Review HR',
+    };
+}
+
+function assessment_report_pdf_review_status_label(string $status): string
+{
+    return match ($status) {
+        'completed' => 'Selesai',
+        'in_progress' => 'Dalam proses',
+        'pending' => 'Menunggu review',
+        'not_created' => 'Belum ada review',
+        default => 'Status tidak diketahui',
+    };
+}
+
+function assessment_report_pdf_recommendation_label(?string $recommendation): string
+{
+    return match ($recommendation) {
+        'recommended' => 'Direkomendasikan',
+        'consider' => 'Dipertimbangkan',
+        'not_recommended' => 'Tidak direkomendasikan',
+        default => '—',
+    };
+}
+
+function assessment_report_pdf_answer_text(array $answer): string
+{
+    $parts = [];
+    $plainText = trim(html_entity_decode(strip_tags((string) ($answer['answer_text'] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    if ($plainText !== '') {
+        $parts[] = $plainText;
+    }
+    foreach (($answer['selected_options'] ?? []) as $option) {
+        if (!is_array($option)) {
+            continue;
+        }
+        $optionText = trim((string) ($option['option_text'] ?? ''));
+        if ($optionText !== '') {
+            $parts[] = trim((string) ($option['label'] ?? 'Dipilih')) . ': ' . $optionText;
+        }
+    }
+    foreach (($answer['files'] ?? []) as $file) {
+        if (is_array($file) && trim((string) ($file['original_file_name'] ?? '')) !== '') {
+            $parts[] = 'File: ' . (string) $file['original_file_name'];
+        }
+    }
+
+    return $parts === [] ? '—' : implode("\n", $parts);
+}
+
+/** Render a detailed per-attempt card; called only on the HR/Admin PDF branch. */
+function assessment_report_pdf_hr_attempt_section(array $row): string
+{
+    $escape = static fn (mixed $value): string => e($value);
+    $participantType = ($row['participant_type'] ?? '') === 'employee' ? 'Karyawan SSO' : 'Kandidat';
+    $identity = array_filter([
+        $participantType,
+        (string) ($row['participant_email'] ?? ''),
+        ($row['participant_division'] ?? '') !== '' ? 'Bidang ' . $row['participant_division'] : '',
+        ($row['participant_department'] ?? '') !== '' ? 'Divisi ' . $row['participant_department'] : '',
+    ], static fn (string $value): bool => $value !== '');
+    $resultLabel = assessment_report_pdf_result_label($row);
+    $submittedAt = (string) (($row['submitted_at'] ?? '') ?: ($row['started_at'] ?? ''));
+    $html = '<section class="attempt-card"><div class="attempt-heading"><div><h2>' . $escape($row['participant_name'] ?? 'Peserta') . '</h2>'
+        . '<p>' . $escape(implode(' · ', $identity)) . '</p></div><span class="attempt-number">Attempt #' . (int) ($row['attempt_number'] ?? 1) . '</span></div>'
+        . '<div class="attempt-meta"><span><b>Jadwal</b>' . $escape((string) ($row['schedule_code'] ?? '') . ' · ' . (string) ($row['schedule_name'] ?? '')) . '</span>'
+        . '<span><b>Paket</b>' . $escape((string) ($row['package_name'] ?? '') . ' · ' . assessment_report_pdf_package_type((string) ($row['package_type'] ?? ''))) . '</span>'
+        . '<span><b>Dikirim</b>' . $escape(assessment_report_pdf_date($submittedAt !== '' ? $submittedAt : null)) . '</span>'
+        . '<span><b>Hasil</b>' . $escape($resultLabel) . '</span></div>'
+        . '<table class="attempt-scores"><tr><td><small>SKOR OBJEKTIF</small><strong>' . $escape(assessment_report_pdf_score($row['objective_score'] ?? null)) . '</strong></td>'
+        . '<td><small>SKOR MANUAL</small><strong>' . $escape(assessment_report_pdf_score($row['manual_score'] ?? null)) . '</strong></td>'
+        . '<td><small>SKOR AKHIR</small><strong>' . $escape(assessment_report_pdf_score($row['total_score'] ?? null)) . '</strong></td>';
+    if (($row['passing_score'] ?? null) !== null) {
+        $html .= '<td><small>NILAI AMBANG</small><strong>' . $escape(assessment_report_pdf_score($row['passing_score'])) . '</strong></td>';
+    }
+    $html .= '</tr></table><h3 class="section-heading">Skor autograde per modul</h3>';
+    if (($row['autograde_modules'] ?? []) === []) {
+        $html .= '<p class="muted">Tidak ada skor autograde tersimpan untuk attempt ini.</p>';
+    } else {
+        $html .= '<table class="detail-table"><thead><tr><th>Modul</th><th>Skor mentah</th><th>Item dinilai</th><th>Persentase</th></tr></thead><tbody>';
+        foreach ($row['autograde_modules'] as $moduleScore) {
+            $percentage = $moduleScore['percentage'] === null
+                ? '—'
+                : number_format((float) $moduleScore['percentage'], 1, ',', '.') . '%';
+            $html .= '<tr><td><strong>' . $escape($moduleScore['module_name']) . '</strong><span class="small">' . $escape($moduleScore['module_category']) . '</span></td>'
+                . '<td class="score">' . $escape(assessment_report_pdf_score($moduleScore['earned_score'])) . ' / ' . $escape(assessment_report_pdf_score($moduleScore['possible_score'])) . '</td>'
+                . '<td>' . (int) $moduleScore['scored_item_count'] . '</td><td>' . $escape($percentage) . '</td></tr>';
+        }
+        $html .= '</tbody></table>';
+    }
+
+    $html .= '<h3 class="section-heading">Review HR dan hasil penilaian <span class="internal-label">Informasi internal HR/Admin</span></h3>';
+    if (($row['hr_reviews'] ?? []) === []) {
+        $html .= '<p class="muted">Belum ada rekaman review HR untuk attempt ini.</p>';
+    } else {
+        foreach ($row['hr_reviews'] as $review) {
+            $status = (string) ($review['review_status'] ?? '');
+            $reviewType = (string) ($review['review_type'] ?? '');
+            $html .= '<article class="review-card"><div class="review-heading"><div><strong>' . $escape(assessment_report_pdf_review_type_label($reviewType)) . '</strong>'
+                . (!empty($review['subject_name']) ? '<span>Subjek: ' . $escape($review['subject_name']) . '</span>' : '')
+                . '</div><span class="review-status status-' . $escape($status) . '">' . $escape(assessment_report_pdf_review_status_label($status)) . '</span></div>'
+                . '<p class="review-meta">Reviewer: ' . $escape($review['reviewer_name'] ?? '—') . ' · ' . $escape(assessment_report_pdf_date($review['reviewed_at'] ?? null)) . '</p>';
+            if (($review['score'] ?? null) !== null || ($review['recommendation'] ?? null) !== null) {
+                $html .= '<div class="review-result">';
+                if (($review['score'] ?? null) !== null) {
+                    $html .= '<span>Skor review <strong>' . $escape(assessment_report_pdf_score($review['score'])) . '</strong></span>';
+                }
+                if (($review['recommendation'] ?? null) !== null) {
+                    $html .= '<span>Rekomendasi <strong>' . $escape(assessment_report_pdf_recommendation_label((string) $review['recommendation'])) . '</strong></span>';
+                }
+                $html .= '</div>';
+            }
+            foreach ([['Kekuatan', $review['strengths'] ?? ''], ['Area pengembangan', $review['development_areas'] ?? ''], ['Catatan internal HR', $review['notes'] ?? '']] as [$label, $value]) {
+                if (trim((string) $value) !== '') {
+                    $html .= '<div class="review-note"><b>' . $escape($label) . '</b><p>' . nl2br($escape($value)) . '</p></div>';
+                }
+            }
+            foreach (($review['records'] ?? []) as $record) {
+                if ($reviewType === 'review_360' && !empty($review['responses'])) {
+                    continue;
+                }
+                $question = trim(strip_tags((string) ($record['question_text'] ?? '')));
+                $answerText = assessment_report_pdf_answer_text($record);
+                if ($question === '' && $answerText === '—') {
+                    continue;
+                }
+                $html .= '<div class="review-answer"><b>' . $escape($question !== '' ? $question : 'Jawaban peserta') . '</b><p>' . nl2br($escape($answerText)) . '</p>';
+                if ((int) ($review['record_count'] ?? 0) > 1 && (($record['score'] ?? null) !== null || trim((string) ($record['notes'] ?? '')) !== '')) {
+                    $html .= '<small>' . (($record['score'] ?? null) !== null ? 'Skor ' . $escape(assessment_report_pdf_score($record['score'])) . ' · ' : '') . $escape((string) ($record['notes'] ?? '')) . '</small>';
+                }
+                $html .= '</div>';
+            }
+            if ($reviewType === 'review_360' && !empty($review['responses'])) {
+                $html .= '<div class="review-response-list"><strong>Jawaban evaluasi 360°</strong><table class="detail-table"><thead><tr><th>Pertanyaan</th><th>Jawaban</th></tr></thead><tbody>';
+                foreach ($review['responses'] as $response) {
+                    $html .= '<tr><td>' . $escape(trim(strip_tags((string) ($response['question_text'] ?? '')))) . '</td><td>'
+                        . nl2br($escape(assessment_report_pdf_answer_text($response))) . '</td></tr>';
+                }
+                $html .= '</tbody></table></div>';
+            }
+            $html .= '</article>';
+        }
+    }
+
+    if (($row['papi_scores'] ?? []) !== []) {
+        $profileScores = assessment_papi_profile_scores($row['papi_scores']);
+        $profileSvg = (string) ($row['papi_chart_svg'] ?? '');
+        if (str_starts_with($profileSvg, '<svg ')) {
+            $profileSvg = preg_replace('/^<svg /', '<svg width="240" height="240" ', $profileSvg, 1) ?? $profileSvg;
+        }
+        $html .= '<h3 class="section-heading">Profil PAPI Kostick · skor mentah</h3><p class="muted">Grafik memakai skala dinamis bertanda dengan nol pada lingkar tengah; data merupakan skor mentah, bukan norma atau interpretasi.</p>'
+            . '<div class="papi-layout"><div class="papi-chart">' . $profileSvg . '</div><table class="papi-table"><thead><tr><th>Area</th><th>Aspek</th><th>Skor mentah</th></tr></thead><tbody>';
+        foreach ($profileScores as $score) {
+            $html .= '<tr><td>' . $escape($score['group']) . '</td><td><strong>' . $escape($score['aspect_code']) . '</strong> · ' . $escape($score['label']) . '</td><td>' . $escape(assessment_papi_format_raw_score($score['raw_score'])) . '</td></tr>';
+        }
+        $html .= '</tbody></table></div>';
+    }
+
+    return $html . '</section>';
+}
+
 function assessment_report_pdf_html(
     array $rows,
     array $summary,
@@ -70,6 +240,7 @@ function assessment_report_pdf_html(
         . '.meta td{padding:1px 4px;vertical-align:top}.meta-label{color:#7a879a;font-size:7px;font-weight:bold;text-transform:uppercase;width:90px}.summary{width:100%;border-collapse:separate;border-spacing:5px;margin:5px -5px 12px}.summary td{width:20%;padding:8px;background:#f7f9fc;border:1px solid #e8edf3;vertical-align:top}.summary small{display:block;color:#75839a;font-size:6px;font-weight:bold;text-transform:uppercase}.summary strong{display:block;margin-top:3px;color:#18375d;font-size:15px}'
         . '.privacy{margin:9px 0;padding:7px 9px;background:#f1f6fb;border-left:3px solid #5378a3;color:#516882;font-size:7px}'
         . 'table.results{width:100%;border-collapse:collapse;table-layout:fixed}table.results thead{display:table-header-group}table.results th{padding:6px 4px;background:#eaf0f7;color:#354c6d;border:1px solid #dbe3ed;font-size:6px;text-align:left;text-transform:uppercase}table.results td{padding:5px 4px;border:1px solid #e6eaf0;vertical-align:top;overflow-wrap:anywhere}table.results tr{page-break-inside:avoid}.small{display:block;margin-top:2px;color:#7f8ca0;font-size:6px}.score{font-weight:bold;color:#223c60;white-space:nowrap}.pill{font-weight:bold;color:#425d7e}.subheading{margin:10px 0 5px;color:#18375d;font-size:10px}.note{margin-top:7px;color:#7b8798;font-size:7px}.empty{margin:28px 0;padding:22px;border:1px solid #e5eaf1;color:#77859a;text-align:center}'
+        . '.attempt-card{margin:10px 0 12px;padding:10px;border:1px solid #dfe6ef;background:#fff}.attempt-heading{width:100%;border-bottom:1px solid #e8edf3;padding-bottom:7px}.attempt-heading>div{display:inline-block;width:82%;vertical-align:top}.attempt-heading h2{margin:0;color:#1c385e;font-size:12px}.attempt-heading p{margin:3px 0 0;color:#748198;font-size:7px}.attempt-number{display:inline-block;border:1px solid #e3e9f0;border-radius:10px;padding:4px 7px;color:#61738c;font-size:7px;font-weight:bold}.attempt-meta{margin:7px 0 5px}.attempt-meta span{display:inline-block;width:48%;padding:2px 3px;vertical-align:top;color:#53647d;font-size:7px}.attempt-meta b{display:block;margin-bottom:1px;color:#8490a2;font-size:6px;text-transform:uppercase}.attempt-scores{width:100%;border-collapse:separate;border-spacing:4px;margin:4px -4px 8px}.attempt-scores td{width:25%;padding:6px 8px;border:1px solid #e6ebf1;background:#f8fafd;vertical-align:top}.attempt-scores small{display:block;color:#7c899d;font-size:6px;font-weight:bold}.attempt-scores strong{display:block;margin-top:3px;color:#234267;font-size:13px}.section-heading{margin:9px 0 5px;padding-bottom:3px;border-bottom:1px solid #e9edf3;color:#274568;font-size:9px}.internal-label{margin-left:5px;color:#a35e4b;font-size:6px;font-weight:normal}.detail-table{width:100%;border-collapse:collapse;margin:4px 0 8px}.detail-table th{padding:5px;background:#f0f4f8;color:#5b6e87;font-size:6px;text-align:left}.detail-table td{padding:5px;border-bottom:1px solid #e9edf3;color:#4c5d74;font-size:7px;vertical-align:top}.detail-table td strong{color:#354b6a}.review-card{margin:6px 0;padding:7px;border:1px solid #e7ebf2;background:#fbfcfe;page-break-inside:auto}.review-heading{width:100%}.review-heading>div{display:inline-block;width:78%;vertical-align:top}.review-heading>div strong,.review-heading>div span{display:block}.review-heading>div strong{color:#354b6a;font-size:8px}.review-heading>div span{margin-top:2px;color:#8490a2;font-size:6px}.review-status{display:inline-block;border-radius:8px;background:#f1f3f6;padding:4px 6px;color:#6d7b90;font-size:6px;font-weight:bold}.review-status.status-completed{background:#eaf7f1;color:#287858}.review-status.status-pending{background:#fff6e9;color:#9b681e}.review-status.status-in_progress{background:#edf3fc;color:#4b6d98}.review-status.status-not_created{background:#f1f2f4;color:#7c8797}.review-meta{margin:3px 0;color:#8490a2;font-size:6px}.review-result{margin:4px 0}.review-result span{display:inline-block;margin-right:5px;border:1px solid #e5eaf1;background:#f6f8fb;padding:4px 6px;color:#77849a;font-size:6px}.review-result strong{color:#354b6a}.review-note{margin-top:4px;border-left:2px solid #dce5f0;padding-left:5px}.review-note b{color:#718096;font-size:6px}.review-note p{margin:2px 0;color:#4f5f77;font-size:7px;overflow-wrap:anywhere}.review-answer{margin-top:5px;border-top:1px solid #eceff3;padding-top:5px}.review-answer b{color:#576981;font-size:7px}.review-answer p{margin:2px 0;color:#68778e;font-size:7px;overflow-wrap:anywhere}.review-answer small{display:block;color:#8994a5;font-size:6px}.review-response-list{margin-top:6px}.review-response-list>strong{color:#526681;font-size:7px}.papi-layout{margin:4px 0}.papi-chart{text-align:center;margin:5px auto 8px;page-break-inside:avoid}.papi-chart svg{display:block;width:240px;height:240px;margin:0 auto}.papi-chart .rv-papi-chart-unavailable{padding:8px;border:1px solid #ece8f1;color:#768399;font-size:7px;text-align:center}.papi-table{width:100%;border-collapse:collapse;margin:5px 0 8px}.papi-table th{padding:4px;background:#f1edf7;color:#756b84;font-size:6px;text-align:left}.papi-table td{padding:4px 5px;border-bottom:1px solid #ece8f1;color:#4f5c70;font-size:6px}.papi-table td:last-child{text-align:right}.muted{color:#7d899b;font-size:7px}'
         . '</style></head><body>'
         . '<div class="brand">PT LAMPUNG JASA UTAMA <small>· E-Assessment</small></div>'
         . '<h1>' . ($managementView ? 'Laporan Agregat Manajemen' : 'Laporan Hasil Asesmen') . '</h1>'
@@ -124,37 +295,19 @@ function assessment_report_pdf_html(
             . '<td><small>Menunggu review</small><strong>' . $count($summary['pending_review_count'] ?? 0) . '</strong></td>'
             . '<td><small>Tingkat lulus per attempt</small><strong>' . $escape($passRate) . '</strong></td>'
             . '</tr></table>'
-            . '<div class="subheading">Rincian individu per attempt</div>';
+            . '<div class="privacy">Laporan rinci per attempt. Catatan dan rekomendasi internal dalam bagian review hanya diperuntukkan bagi HR/Admin.</div>'
+            . '<div class="subheading">Laporan lengkap per peserta</div>';
         if ($rows === []) {
             $html .= '<div class="empty">Belum ada hasil pada filter yang dipilih.</div>';
         } else {
-            $html .= '<table class="results"><thead><tr><th style="width:19%">Peserta</th><th style="width:21%">Jadwal / paket</th><th style="width:6%">Ke</th><th style="width:11%">Waktu kirim</th><th style="width:7%">Objektif</th><th style="width:7%">Manual</th><th style="width:7%">Skor akhir</th><th style="width:12%">Hasil</th><th style="width:10%">Review tertunda</th></tr></thead><tbody>';
             foreach ($rows as $row) {
-                $participantType = $row['participant_type'] === 'employee' ? 'Karyawan SSO' : 'Kandidat';
-                $identityParts = [$participantType, (string) ($row['participant_email'] ?? '')];
-                if (($row['participant_division'] ?? '') !== '') {
-                    $identityParts[] = 'Bidang ' . $row['participant_division'];
-                }
-                if (($row['participant_department'] ?? '') !== '') {
-                    $identityParts[] = 'Divisi ' . $row['participant_department'];
-                }
-                $submitted = assessment_report_pdf_date($row['submitted_at'] ?: $row['started_at']);
-                $html .= '<tr><td><strong>' . $escape($row['participant_name']) . '</strong><span class="small">' . $escape(implode(' · ', array_filter($identityParts, static fn (string $part): bool => $part !== ''))) . '</span></td>'
-                    . '<td>' . $escape((string) $row['schedule_code'] . ' · ' . (string) $row['schedule_name']) . '<span class="small">' . $escape($row['package_name']) . ' · ' . $escape(assessment_report_pdf_package_type((string) $row['package_type'])) . '</span></td>'
-                    . '<td>' . (int) $row['attempt_number'] . '</td><td>' . $escape($submitted) . '</td>'
-                    . '<td class="score">' . $escape(assessment_report_pdf_score($row['objective_score'])) . '</td>'
-                    . '<td class="score">' . $escape(assessment_report_pdf_score($row['manual_score'])) . '</td>'
-                    . '<td class="score">' . $escape(assessment_report_pdf_score($row['total_score']))
-                    . ($row['passing_score'] !== null ? '<span class="small">Ambang ' . $escape(assessment_report_pdf_score($row['passing_score'])) . '</span>' : '') . '</td>'
-                    . '<td class="pill">' . $escape(assessment_report_pdf_result_label($row)) . '</td>'
-                    . '<td>' . ((int) $row['pending_review_count'] > 0 ? $count($row['pending_review_count']) . ' item' : '—') . '</td></tr>';
+                $html .= assessment_report_pdf_hr_attempt_section($row);
             }
-            $html .= '</tbody></table>';
         }
         if ((int) ($summary['attempt_count'] ?? 0) > count($rows)) {
-            $html .= '<p class="note">Daftar PDF dibatasi hingga ' . $count($rowLimit) . ' attempt terbaru. Persempit filter untuk mencakup data lain.</p>';
+            $html .= '<p class="note">PDF dibatasi hingga ' . $count($rowLimit) . ' attempt terbaru. Persempit filter untuk mencakup data lain.</p>';
         }
-        $html .= '<p class="note">Rincian identitas dan nilai individual ini hanya untuk HR/Admin. Tingkat lulus dihitung per attempt selesai yang memiliki nilai ambang.</p>';
+        $html .= '<p class="note">Identitas, skor individual, hasil review, dan catatan internal dalam dokumen ini hanya untuk HR/Admin. Tingkat lulus dihitung per attempt selesai yang memiliki nilai ambang.</p>';
     }
 
     $html .= '<p class="note">Dicetak pada ' . e((new DateTimeImmutable('now'))->format('d/m/Y H:i')) . ' WIB · Data mengikuti filter laporan yang dipilih.</p>'

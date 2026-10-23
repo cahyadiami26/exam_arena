@@ -349,6 +349,462 @@ function assessment_report_hr_papi_profiles(array $filters, int $attemptLimit = 
     return array_values($attemptProfiles);
 }
 
+/** Return consolidated HR-only PAPI review outcomes for a bounded set of attempts. */
+function assessment_report_hr_papi_review_summaries(array $rawAttemptIds): array
+{
+    if (!app_is_hr()) {
+        throw new DomainException('Review PAPI hanya tersedia untuk HR/Admin.');
+    }
+    $attemptIds = array_values(array_unique(array_filter(array_map('intval', $rawAttemptIds), static fn (int $id): bool => $id > 0)));
+    if ($attemptIds === []) {
+        return [];
+    }
+    $placeholders = implode(', ', array_fill(0, count($attemptIds), '?'));
+    $statement = db()->prepare(
+        "SELECT id AS review_id, attempt_id, status AS review_status, reviewer_user_id,
+                score, recommendation, strengths, development_areas, notes, reviewed_at
+         FROM assessment_reviews
+         WHERE review_type = 'papi' AND attempt_id IN ($placeholders)
+         ORDER BY attempt_id, reviewed_at DESC, id DESC"
+    );
+    $statement->execute($attemptIds);
+    $rows = $statement->fetchAll();
+    $summaries = [];
+    $reviewerIds = [];
+    foreach ($rows as $row) {
+        $attemptId = (int) $row['attempt_id'];
+        if (!isset($summaries[$attemptId])) {
+            $summaries[$attemptId] = [
+                'review_type' => 'papi',
+                'review_status' => 'completed',
+                'reviewer_user_id' => null,
+                'reviewer_name' => '—',
+                'score' => null,
+                'recommendation' => null,
+                'strengths' => null,
+                'development_areas' => null,
+                'notes' => null,
+                'reviewed_at' => null,
+                'record_count' => 0,
+                '_canonical_rank' => -1,
+            ];
+        }
+        $summaries[$attemptId]['record_count']++;
+        if ($row['review_status'] === 'pending'
+            || ($row['review_status'] === 'in_progress' && $summaries[$attemptId]['review_status'] !== 'pending')) {
+            $summaries[$attemptId]['review_status'] = (string) $row['review_status'];
+        }
+        $reviewerId = (int) ($row['reviewer_user_id'] ?? 0);
+        if ($reviewerId > 0) {
+            $reviewerIds[] = $reviewerId;
+        }
+        $reviewedAt = $row['reviewed_at'] ? (strtotime((string) $row['reviewed_at']) ?: 0) : 0;
+        $rank = ($row['review_status'] === 'completed' ? 1000000000000 : 0) + $reviewedAt;
+        if ($rank > $summaries[$attemptId]['_canonical_rank']) {
+            $summaries[$attemptId]['_canonical_rank'] = $rank;
+            foreach (['reviewer_user_id', 'score', 'recommendation', 'strengths', 'development_areas', 'notes', 'reviewed_at'] as $field) {
+                $summaries[$attemptId][$field] = $field === 'score' && $row[$field] !== null
+                    ? (float) $row[$field]
+                    : $row[$field];
+            }
+        }
+    }
+    $reviewerIds = array_values(array_unique(array_filter($reviewerIds)));
+    $profiles = [];
+    if ($reviewerIds !== []) {
+        try {
+            $profiles = assessment_report_employee_profiles($reviewerIds);
+        } catch (Throwable $exception) {
+            error_log('E-Assessment PAPI review reviewer lookup failed: ' . $exception->getMessage());
+        }
+    }
+    foreach ($summaries as &$summary) {
+        $reviewerId = (int) ($summary['reviewer_user_id'] ?? 0);
+        $summary['reviewer_name'] = $profiles[$reviewerId]['name'] ?? ($reviewerId > 0 ? 'Reviewer #' . $reviewerId : '—');
+        unset($summary['_canonical_rank']);
+    }
+    unset($summary);
+
+    return $summaries;
+}
+
+/**
+ * Load the HR-only, expanded report per attempt: automatic module scores, consolidated
+ * HR review outcomes, PAPI raw profiles, and answer context for PAPI/360 review groups.
+ * Internal notes are returned only through this HR-guarded function.
+ */
+function assessment_report_hr_complete_attempts(array $filters, int $limit = 500): array
+{
+    if (!app_is_hr()) {
+        throw new DomainException('Laporan lengkap per peserta hanya tersedia untuk HR/Admin.');
+    }
+    $limit = max(1, min(500, $limit));
+    $attempts = assessment_report_hr_attempts($filters, $limit);
+    if ($attempts === []) {
+        return [];
+    }
+
+    $attemptIds = array_values(array_unique(array_map('intval', array_column($attempts, 'attempt_id'))));
+    $placeholders = implode(', ', array_fill(0, count($attemptIds), '?'));
+    $attemptIndexById = [];
+    foreach ($attempts as $index => &$attempt) {
+        $attempt['autograde_modules'] = [];
+        $attempt['hr_reviews'] = [];
+        $attempt['papi_scores'] = [];
+        $attempt['papi_chart_svg'] = '';
+        $attemptIndexById[(int) $attempt['attempt_id']] = $index;
+    }
+    unset($attempt);
+
+    $moduleScores = db()->prepare(
+        "SELECT aa.attempt_id, m.id AS module_id, m.name AS module_name,
+                m.category AS module_category, COUNT(*) AS scored_item_count,
+                COALESCE(SUM(aa.auto_score), 0) AS earned_score,
+                COALESCE(SUM(COALESCE(mq.points_override, q.max_score * q.weight)), 0) AS possible_score
+         FROM attempt_answers aa
+         INNER JOIN question_bank q ON q.id = aa.question_id
+         INNER JOIN assessment_modules m ON m.id = aa.module_id
+         LEFT JOIN module_questions mq ON mq.module_id = aa.module_id AND mq.question_id = aa.question_id
+         WHERE aa.attempt_id IN ($placeholders) AND aa.auto_score IS NOT NULL
+         GROUP BY aa.attempt_id, m.id, m.name, m.category
+         ORDER BY aa.attempt_id, m.name, m.id"
+    );
+    $moduleScores->execute($attemptIds);
+    foreach ($moduleScores->fetchAll() as $score) {
+        $attemptId = (int) $score['attempt_id'];
+        if (!isset($attemptIndexById[$attemptId])) {
+            continue;
+        }
+        $attemptIndex = $attemptIndexById[$attemptId];
+        $earned = (float) $score['earned_score'];
+        $possible = (float) $score['possible_score'];
+        $attempts[$attemptIndex]['autograde_modules'][] = [
+            'module_id' => (int) $score['module_id'],
+            'module_name' => (string) $score['module_name'],
+            'module_category' => (string) $score['module_category'],
+            'scored_item_count' => (int) $score['scored_item_count'],
+            'earned_score' => $earned,
+            'possible_score' => $possible,
+            'percentage' => $possible > 0 ? round(($earned / $possible) * 100, 1) : null,
+        ];
+    }
+
+    $reviewStatement = db()->prepare(
+        "SELECT r.id AS review_id, r.attempt_id, r.answer_id, r.review_type,
+                r.status AS review_status, r.reviewer_user_id, r.score,
+                r.recommendation, r.strengths, r.development_areas, r.notes,
+                r.reviewed_at, r.created_at,
+                aa.review_assignment_id, aa.question_id, aa.answer_text, aa.answer_payload,
+                q.category, q.question_type, q.question_text, q.papi_item_code,
+                m.name AS module_name, m.module_kind, ra.subject_user_id
+         FROM assessment_reviews r
+         LEFT JOIN attempt_answers aa ON aa.id = r.answer_id
+         LEFT JOIN question_bank q ON q.id = aa.question_id
+         LEFT JOIN assessment_modules m ON m.id = aa.module_id
+         LEFT JOIN review_assignments ra ON ra.id = aa.review_assignment_id
+         WHERE r.attempt_id IN ($placeholders)
+         ORDER BY r.attempt_id, r.review_type, r.reviewed_at DESC, r.id DESC"
+    );
+    $reviewStatement->execute($attemptIds);
+    $reviewRows = $reviewStatement->fetchAll();
+
+    $groupKey = static function (string $type, int $attemptId, int $assignmentId, int $reviewId): string {
+        if ($type === 'papi') {
+            return 'papi:' . $attemptId;
+        }
+        if ($type === 'review_360') {
+            return 'review_360:' . $attemptId . ':' . $assignmentId;
+        }
+        return 'review:' . $reviewId;
+    };
+    $reviewGroups = [];
+    $employeeIds = [];
+    foreach ($reviewRows as $row) {
+        $attemptId = (int) $row['attempt_id'];
+        $type = (string) $row['review_type'];
+        $assignmentId = (int) ($row['review_assignment_id'] ?? 0);
+        $key = $groupKey($type, $attemptId, $assignmentId, (int) $row['review_id']);
+        if (!isset($reviewGroups[$attemptId][$key])) {
+            $reviewGroups[$attemptId][$key] = [
+                'group_key' => $key,
+                'review_type' => $type,
+                'review_status' => 'completed',
+                'review_id' => (int) $row['review_id'],
+                'review_assignment_id' => $assignmentId,
+                'subject_user_id' => (int) ($row['subject_user_id'] ?? 0),
+                'reviewer_user_id' => null,
+                'recommendation' => null,
+                'strengths' => null,
+                'development_areas' => null,
+                'notes' => null,
+                'score' => null,
+                'reviewed_at' => null,
+                'records' => [],
+                'responses' => [],
+                '_canonical_rank' => -1,
+            ];
+        }
+        $recordStatus = (string) $row['review_status'];
+        if ($recordStatus === 'pending'
+            || ($recordStatus === 'in_progress' && $reviewGroups[$attemptId][$key]['review_status'] !== 'pending')) {
+            $reviewGroups[$attemptId][$key]['review_status'] = $recordStatus;
+        }
+        $reviewerId = (int) ($row['reviewer_user_id'] ?? 0);
+        $subjectId = (int) ($row['subject_user_id'] ?? 0);
+        if ($reviewerId > 0) {
+            $employeeIds[] = $reviewerId;
+        }
+        if ($subjectId > 0) {
+            $employeeIds[] = $subjectId;
+        }
+        $record = [
+            'review_id' => (int) $row['review_id'],
+            'answer_id' => (int) ($row['answer_id'] ?? 0),
+            'review_status' => $recordStatus,
+            'reviewer_user_id' => $reviewerId,
+            'reviewer_name' => '',
+            'score' => $row['score'] !== null ? (float) $row['score'] : null,
+            'recommendation' => $row['recommendation'],
+            'strengths' => $row['strengths'],
+            'development_areas' => $row['development_areas'],
+            'notes' => $row['notes'],
+            'reviewed_at' => $row['reviewed_at'],
+            'question_id' => $row['question_id'] !== null ? (int) $row['question_id'] : null,
+            'question_text' => (string) ($row['question_text'] ?? ''),
+            'question_type' => (string) ($row['question_type'] ?? ''),
+            'module_name' => (string) ($row['module_name'] ?? ''),
+            'answer_text' => (string) ($row['answer_text'] ?? ''),
+            'answer_payload' => $row['answer_payload'],
+            'category' => (string) ($row['category'] ?? ''),
+            'papi_item_code' => (string) ($row['papi_item_code'] ?? ''),
+            'selected_options' => [],
+        ];
+        $reviewGroups[$attemptId][$key]['records'][] = $record;
+        $reviewedAt = $row['reviewed_at'] ? (strtotime((string) $row['reviewed_at']) ?: 0) : 0;
+        $canonicalRank = ($recordStatus === 'completed' ? 1000000000000 : 0) + $reviewedAt;
+        if ($canonicalRank > $reviewGroups[$attemptId][$key]['_canonical_rank']) {
+            $reviewGroups[$attemptId][$key]['_canonical_rank'] = $canonicalRank;
+            foreach (['review_id', 'reviewer_user_id', 'recommendation', 'strengths', 'development_areas', 'notes', 'score', 'reviewed_at'] as $field) {
+                $reviewGroups[$attemptId][$key][$field] = $field === 'score' && $row[$field] !== null
+                    ? (float) $row[$field]
+                    : $row[$field];
+            }
+        }
+    }
+
+    $responseStatement = db()->prepare(
+        "SELECT aa.id AS answer_id, aa.attempt_id, aa.review_assignment_id,
+                aa.answer_text, aa.answer_payload,
+                q.id AS question_id, q.category, q.question_type, q.question_text,
+                q.papi_item_code, m.name AS module_name, m.module_kind,
+                ra.subject_user_id
+         FROM attempt_answers aa
+         INNER JOIN question_bank q ON q.id = aa.question_id
+         INNER JOIN assessment_modules m ON m.id = aa.module_id
+         LEFT JOIN review_assignments ra ON ra.id = aa.review_assignment_id
+         WHERE aa.attempt_id IN ($placeholders)
+           AND (m.module_kind = 'review_360'
+                OR (q.question_type = 'forced_choice'
+                    AND (q.papi_item_code IS NOT NULL OR q.category = 'PAPI_KOSTICK')))
+         ORDER BY aa.attempt_id, aa.module_id, aa.question_id"
+    );
+    $responseStatement->execute($attemptIds);
+    $responseRows = $responseStatement->fetchAll();
+    foreach ($responseRows as $row) {
+        $attemptId = (int) $row['attempt_id'];
+        $type = $row['module_kind'] === 'review_360' ? 'review_360' : 'papi';
+        $assignmentId = (int) ($row['review_assignment_id'] ?? 0);
+        $key = $groupKey($type, $attemptId, $assignmentId, 0);
+        if (!isset($reviewGroups[$attemptId][$key])) {
+            $reviewGroups[$attemptId][$key] = [
+                'group_key' => $key,
+                'review_type' => $type,
+                'review_status' => 'not_created',
+                'review_id' => 0,
+                'review_assignment_id' => $assignmentId,
+                'subject_user_id' => (int) ($row['subject_user_id'] ?? 0),
+                'reviewer_user_id' => null,
+                'recommendation' => null,
+                'strengths' => null,
+                'development_areas' => null,
+                'notes' => null,
+                'score' => null,
+                'reviewed_at' => null,
+                'records' => [],
+                'responses' => [],
+                '_canonical_rank' => -1,
+            ];
+        }
+        $response = [
+            'answer_id' => (int) $row['answer_id'],
+            'question_id' => (int) $row['question_id'],
+            'question_text' => (string) $row['question_text'],
+            'question_type' => (string) $row['question_type'],
+            'module_name' => (string) $row['module_name'],
+            'answer_text' => (string) ($row['answer_text'] ?? ''),
+            'answer_payload' => $row['answer_payload'],
+            'category' => (string) $row['category'],
+            'papi_item_code' => (string) ($row['papi_item_code'] ?? ''),
+            'selected_options' => [],
+        ];
+        $reviewGroups[$attemptId][$key]['responses'][] = $response;
+        $subjectId = (int) ($row['subject_user_id'] ?? 0);
+        if ($subjectId > 0) {
+            $employeeIds[] = $subjectId;
+        }
+    }
+
+    $fileStatement = db()->prepare(
+        "SELECT f.answer_id, f.original_file_name, f.mime_type, f.file_size_bytes, f.uploaded_at
+         FROM attempt_answer_files f
+         INNER JOIN attempt_answers aa ON aa.id = f.answer_id
+         INNER JOIN assessment_modules m ON m.id = aa.module_id
+         WHERE aa.attempt_id IN ($placeholders)
+           AND (m.module_kind = 'review_360' OR EXISTS (
+               SELECT 1 FROM assessment_reviews existing_review
+               WHERE existing_review.answer_id = aa.id
+           ))
+         ORDER BY f.answer_id, f.uploaded_at, f.id"
+    );
+    $fileStatement->execute($attemptIds);
+    $filesByAnswer = [];
+    foreach ($fileStatement->fetchAll() as $file) {
+        $filesByAnswer[(int) $file['answer_id']][] = [
+            'original_file_name' => (string) $file['original_file_name'],
+            'mime_type' => (string) $file['mime_type'],
+            'file_size_bytes' => (int) $file['file_size_bytes'],
+            'uploaded_at' => $file['uploaded_at'],
+        ];
+    }
+
+    $questionIdsRaw = [];
+    foreach ($reviewRows as $row) {
+        if ($row['answer_payload'] !== null && $row['question_id'] !== null) {
+            $questionIdsRaw[] = (int) $row['question_id'];
+        }
+    }
+    foreach ($responseRows as $row) {
+        if ($row['answer_payload'] !== null) {
+            $questionIdsRaw[] = (int) $row['question_id'];
+        }
+    }
+    $questionIds = array_values(array_unique(array_filter($questionIdsRaw)));
+    $optionsByQuestion = [];
+    if ($questionIds !== []) {
+        $questionPlaceholders = implode(', ', array_fill(0, count($questionIds), '?'));
+        $optionStatement = db()->prepare(
+            "SELECT id, question_id, option_key, option_text, papi_aspect_code
+             FROM question_options WHERE question_id IN ($questionPlaceholders)
+             ORDER BY question_id, sort_order, id"
+        );
+        $optionStatement->execute($questionIds);
+        foreach ($optionStatement->fetchAll() as $option) {
+            $optionsByQuestion[(int) $option['question_id']][(int) $option['id']] = $option;
+        }
+    }
+    $enrichAnswer = static function (array $answer) use ($optionsByQuestion): array {
+        $payload = $answer['answer_payload'] !== null
+            ? json_decode((string) $answer['answer_payload'], true)
+            : [];
+        $payload = is_array($payload) ? $payload : [];
+        $roles = [];
+        $mostId = (int) ($payload['most_option_id'] ?? 0);
+        $leastId = (int) ($payload['least_option_id'] ?? 0);
+        if ($mostId > 0) {
+            $roles[$mostId] = 'Most';
+        }
+        if ($leastId > 0) {
+            $roles[$leastId] = 'Least';
+        }
+        foreach (is_array($payload['selected_option_ids'] ?? null) ? $payload['selected_option_ids'] : [] as $optionId) {
+            if ((int) $optionId > 0 && !isset($roles[(int) $optionId])) {
+                $roles[(int) $optionId] = 'Dipilih';
+            }
+        }
+        $singleId = (int) ($payload['selected_option_id'] ?? 0);
+        if ($singleId > 0 && !isset($roles[$singleId])) {
+            $roles[$singleId] = 'Dipilih';
+        }
+        $questionId = (int) ($answer['question_id'] ?? 0);
+        $answer['selected_options'] = [];
+        foreach ($roles as $optionId => $role) {
+            $option = $optionsByQuestion[$questionId][(int) $optionId] ?? null;
+            if ($option !== null) {
+                $answer['selected_options'][] = [
+                    'id' => (int) $option['id'],
+                    'label' => $role,
+                    'option_key' => (string) $option['option_key'],
+                    'option_text' => (string) $option['option_text'],
+                    'aspect_code' => (string) ($option['papi_aspect_code'] ?? ''),
+                ];
+            }
+        }
+        unset($answer['answer_payload']);
+        return $answer;
+    };
+
+    foreach ($reviewGroups as &$groups) {
+        foreach ($groups as &$group) {
+            foreach ($group['records'] as &$record) {
+                $record = $enrichAnswer($record);
+                $record['files'] = $filesByAnswer[(int) ($record['answer_id'] ?? 0)] ?? [];
+            }
+            unset($record);
+            foreach ($group['responses'] as &$response) {
+                $response = $enrichAnswer($response);
+                $response['files'] = $filesByAnswer[(int) ($response['answer_id'] ?? 0)] ?? [];
+            }
+            unset($response);
+        }
+        unset($group);
+    }
+    unset($groups);
+
+    $papiProfiles = assessment_report_hr_papi_profiles($filters, $limit);
+    foreach ($papiProfiles as $profile) {
+        $attemptId = (int) $profile['attempt_id'];
+        if (isset($attemptIndexById[$attemptId])) {
+            $attemptIndex = $attemptIndexById[$attemptId];
+            $attempts[$attemptIndex]['papi_scores'] = $profile['scores'];
+            $attempts[$attemptIndex]['papi_chart_svg'] = assessment_papi_profile_svg($profile['scores']);
+        }
+    }
+
+    $employeeIds = array_values(array_unique(array_filter(array_map('intval', $employeeIds), static fn (int $id): bool => $id > 0)));
+    $employeeProfiles = [];
+    if ($employeeIds !== []) {
+        try {
+            $employeeProfiles = assessment_report_employee_profiles($employeeIds);
+        } catch (Throwable $exception) {
+            error_log('E-Assessment complete report reviewer/subject lookup failed: ' . $exception->getMessage());
+        }
+    }
+
+    foreach ($reviewGroups as $attemptId => $groups) {
+        $attemptId = (int) $attemptId;
+        if (!isset($attemptIndexById[$attemptId])) {
+            continue;
+        }
+        foreach ($groups as &$group) {
+            $reviewerId = (int) ($group['reviewer_user_id'] ?? 0);
+            $subjectId = (int) ($group['subject_user_id'] ?? 0);
+            $group['reviewer_name'] = $employeeProfiles[$reviewerId]['name'] ?? ($reviewerId > 0 ? 'Reviewer #' . $reviewerId : '—');
+            $group['subject_name'] = $employeeProfiles[$subjectId]['name'] ?? ($subjectId > 0 ? 'Karyawan #' . $subjectId : '');
+            foreach ($group['records'] as &$record) {
+                $recordReviewerId = (int) ($record['reviewer_user_id'] ?? 0);
+                $record['reviewer_name'] = $employeeProfiles[$recordReviewerId]['name'] ?? ($recordReviewerId > 0 ? 'Reviewer #' . $recordReviewerId : '—');
+            }
+            unset($record);
+            unset($group['_canonical_rank']);
+            $group['record_count'] = count($group['records']);
+        }
+        unset($group);
+        $attempts[$attemptIndexById[$attemptId]]['hr_reviews'] = array_values($groups);
+    }
+
+    return $attempts;
+}
+
 /** Score-only leaderboard eligibility; PAPI and 360° packages are not rank-comparable. */
 function assessment_report_leaderboard_exclusions_sql(): string
 {

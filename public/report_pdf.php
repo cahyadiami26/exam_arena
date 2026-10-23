@@ -24,7 +24,7 @@ try {
 if (!app_load_dompdf()) {
     http_response_code(503);
     header('Content-Type: text/plain; charset=UTF-8');
-    exit('Ekspor PDF belum siap. Jalankan scripts/install_dompdf.sh dan pastikan ekstensi PHP dom, mbstring, serta iconv aktif.');
+    exit('Ekspor PDF belum siap. Pastikan pustaka lib/dompdf tersedia dan ekstensi PHP dom, mbstring, serta iconv aktif.');
 }
 
 try {
@@ -53,7 +53,7 @@ try {
 
     if ($isHr) {
         $summary = assessment_report_aggregate($filters, true);
-        $rows = assessment_report_hr_attempts($filters, 500);
+        $rows = assessment_report_hr_complete_attempts($filters, 500);
         $rowLimit = 500;
     } else {
         $summary = assessment_report_aggregate($filters, false);
