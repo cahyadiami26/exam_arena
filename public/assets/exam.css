@@ -106,7 +106,32 @@
 .forced-most-mark, .forced-least-mark { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; background: #edf5f1; color: #2f8064; font-size: 9px; }
 .forced-least-mark { background: #fff1e6; color: #a4611c; }
 .forced-choice-grid select { width: 100%; min-height: 39px; border: 1px solid #e0e5ed; border-radius: 7px; background: #fff; padding: 0 8px; color: #526079; font-size: 8px; }
-.forced-help { margin: 8px 0 0; color: #9a8a73; font-size: 7px; }
+.forced-choice-options { display: grid; gap: 10px; margin-top: 18px; }
+.forced-choice-option-card { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(260px,1fr); align-items: center; gap: 14px; border: 1px solid #e3e9f1; border-radius: 11px; background: #fff; padding: 13px; }
+.forced-choice-option-copy { display: flex; min-width: 0; align-items: flex-start; gap: 10px; }
+.forced-choice-option-key { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 8px; background: #eef3fb; color: #4e6788; font-size: 11px; font-weight: 800; }
+.forced-choice-option-copy-content { min-width: 0; }
+.forced-choice-option-copy-content > strong { color: #69768d; font-size: 10px; font-weight: 750; }
+.forced-choice-option-copy-content > p { margin: 4px 0 0; color: #35435d; font-size: 13px; font-weight: 550; line-height: 1.55; overflow-wrap: anywhere; }
+.forced-choice-option-copy-content .option-image { margin-top: 8px; }
+.forced-choice-option-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.forced-choice-radio-card { position: relative; display: flex; min-width: 0; min-height: 52px; align-items: center; gap: 8px; border: 1px solid #dfe5ee; border-radius: 9px; background: #f9fbfd; padding: 8px 9px; cursor: pointer; transition: background .14s ease, border .14s ease, box-shadow .14s ease; }
+.forced-choice-radio-card:hover { border-color: #aabed8; background: #f5f8fd; }
+.forced-choice-radio-card.is-selected { box-shadow: 0 0 0 2px rgba(70,111,166,.08); }
+.forced-choice-radio-card.is-most.is-selected { border-color: #67a88e; background: #eff8f3; }
+.forced-choice-radio-card.is-least.is-selected { border-color: #d49b63; background: #fff6ed; }
+.forced-choice-radio-card input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.forced-choice-radio-indicator { display: grid; width: 17px; height: 17px; flex: 0 0 auto; place-items: center; border: 1px solid #c8d1df; border-radius: 50%; background: #fff; }
+.forced-choice-radio-card input:checked + .forced-choice-radio-indicator { border-color: #315b8b; box-shadow: inset 0 0 0 4px #315b8b; }
+.forced-choice-radio-card.is-most input:checked + .forced-choice-radio-indicator { border-color: #2f8064; box-shadow: inset 0 0 0 4px #2f8064; }
+.forced-choice-radio-card.is-least input:checked + .forced-choice-radio-indicator { border-color: #a4611c; box-shadow: inset 0 0 0 4px #a4611c; }
+.forced-choice-radio-card:has(input:focus-visible) { outline: 3px solid rgba(48,114,191,.28); outline-offset: 2px; }
+.forced-choice-radio-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.forced-choice-radio-copy strong { color: #43516a; font-size: 11px; font-weight: 800; }
+.forced-choice-radio-card.is-most .forced-choice-radio-copy strong { color: #28765c; }
+.forced-choice-radio-card.is-least .forced-choice-radio-copy strong { color: #a15d1a; }
+.forced-choice-radio-copy small { color: #758198; font-size: 9px; line-height: 1.3; }
+.forced-help { margin: 8px 0 0; color: #6f7b90; font-size: 10px; line-height: 1.5; }
 .rich-editor-wrap { overflow: hidden; border: 1px solid #dfe5ed; border-radius: 8px; margin-top: 16px; }
 .rich-toolbar { display: flex; gap: 4px; border-bottom: 1px solid #e8ebf0; background: #f8f9fb; padding: 6px; }
 .rich-toolbar button { display: grid; width: 28px; height: 27px; place-items: center; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #63718a; cursor: pointer; }
@@ -267,6 +292,7 @@
     .choice-option { padding: 8px; }
     .choice-copy { font-size: 8px; }
     .forced-choice-grid { grid-template-columns: 1fr; }
+    .forced-choice-option-card { grid-template-columns: minmax(0,1fr); }
     .exam-rightbar { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
     .rightbar-support { grid-column: 1 / -1; }
 }

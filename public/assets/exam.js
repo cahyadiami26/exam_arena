@@ -76,6 +76,28 @@
         return result;
     };
 
+    const getForcedChoiceValue = (card, selector) => {
+        const controls = [...card.querySelectorAll(selector)];
+        if (!controls.length) return '';
+        if (controls[0].type === 'radio') return controls.find((control) => control.checked)?.value || '';
+        return controls[0].value || '';
+    };
+
+    const updateForcedChoiceState = (card, changedControl = null) => {
+        const most = getForcedChoiceValue(card, '[data-forced-most]');
+        const least = getForcedChoiceValue(card, '[data-forced-least]');
+        if (most && least && most === least) {
+            const clearSelector = changedControl?.matches('[data-forced-most]') ? '[data-forced-least]' : '[data-forced-most]';
+            const controlsToClear = [...card.querySelectorAll(clearSelector)];
+            if (controlsToClear[0]?.type === 'radio') controlsToClear.forEach((control) => { control.checked = false; });
+            else if (controlsToClear[0]) controlsToClear[0].value = '';
+            showToast('Most dan Least harus berbeda. Pilihan sebelumnya dikosongkan.');
+        }
+        card.querySelectorAll('.forced-choice-radio-card').forEach((choice) => {
+            choice.classList.toggle('is-selected', Boolean(choice.querySelector('input[type="radio"]')?.checked));
+        });
+    };
+
     const getQuestionPayload = (card) => {
         const type = card.dataset.questionType;
         if (type === 'single_choice') {
@@ -86,8 +108,8 @@
             return { selected_option_ids: [...card.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value) };
         }
         if (type === 'forced_choice') {
-            const most = card.querySelector('[data-forced-most]')?.value || '';
-            const least = card.querySelector('[data-forced-least]')?.value || '';
+            const most = getForcedChoiceValue(card, '[data-forced-most]');
+            const least = getForcedChoiceValue(card, '[data-forced-least]');
             if (most && least && most === least) {
                 showToast('Pilihan Most dan Least harus berbeda.');
                 return null;
@@ -105,8 +127,8 @@
         if (type === 'single_choice') return Boolean(card.querySelector('input[type="radio"]:checked'));
         if (type === 'multi_select') return Boolean(card.querySelector('input[type="checkbox"]:checked'));
         if (type === 'forced_choice') {
-            const most = card.querySelector('[data-forced-most]')?.value;
-            const least = card.querySelector('[data-forced-least]')?.value;
+            const most = getForcedChoiceValue(card, '[data-forced-most]');
+            const least = getForcedChoiceValue(card, '[data-forced-least]');
             return Boolean(most && least && most !== least);
         }
         if (type === 'essay') return Boolean((card.querySelector('[data-rich-editor]')?.innerText || '').trim());
@@ -211,9 +233,11 @@
     nextButton?.addEventListener('click', () => showQuestion(currentIndex + 1));
 
     questions.forEach((card) => {
+        if (card.dataset.questionType === 'forced_choice') updateForcedChoiceState(card);
         card.querySelectorAll('input[type="radio"], input[type="checkbox"], select[data-answer-control]').forEach((control) => {
             control.addEventListener('change', () => {
                 card.querySelectorAll('.choice-option').forEach((option) => option.classList.toggle('is-selected', Boolean(option.querySelector('input:checked'))));
+                if (card.dataset.questionType === 'forced_choice') updateForcedChoiceState(card, control);
                 queueSave(card);
             });
         });

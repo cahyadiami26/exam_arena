@@ -448,11 +448,35 @@ function exam_render_option_image(int $attemptId, array $option): void
                                 <?php endforeach; ?>
                             </div>
                         <?php elseif ($question['question_type'] === 'forced_choice'): ?>
-                            <div class="forced-choice-grid">
-                                <label><span><b class="forced-most-mark">M</b><span><strong>Paling menggambarkan saya</strong><small>Most</small></span></span><select data-forced-most data-answer-control><option value="">Pilih pernyataan…</option><?php foreach ($question['options'] as $option): ?><option value="<?= (int) $option['option_id'] ?>" <?= $selectedMost === (int) $option['option_id'] ? 'selected' : '' ?>><?= e($option['option_key'] . '. ' . $option['option_text']) ?></option><?php endforeach; ?></select></label>
-                                <label><span><b class="forced-least-mark">L</b><span><strong>Paling tidak menggambarkan saya</strong><small>Least</small></span></span><select data-forced-least data-answer-control><option value="">Pilih pernyataan…</option><?php foreach ($question['options'] as $option): ?><option value="<?= (int) $option['option_id'] ?>" <?= $selectedLeast === (int) $option['option_id'] ? 'selected' : '' ?>><?= e($option['option_key'] . '. ' . $option['option_text']) ?></option><?php endforeach; ?></select></label>
-                            </div>
-                            <p class="forced-help">Pilihan Most dan Least harus berbeda. Tidak ada jawaban benar atau salah.</p>
+                            <?php if ($question['category'] === 'PAPI_KOSTICK'): ?>
+                                <div class="forced-choice-options" role="group" aria-label="Pilihan Most dan Least">
+                                    <?php foreach ($question['options'] as $optionIndex => $option): ?>
+                                        <?php $optionId = (int) $option['option_id']; $optionKey = (string) ($option['option_key'] ?: chr(65 + $optionIndex)); ?>
+                                        <article class="forced-choice-option-card">
+                                            <div class="forced-choice-option-copy">
+                                                <span class="forced-choice-option-key"><?= e($optionKey) ?></span>
+                                                <div class="forced-choice-option-copy-content"><strong>Pernyataan <?= e($optionKey) ?></strong><p><?= nl2br(e($option['option_text'])) ?></p><?php exam_render_option_image($attemptId, $option); ?></div>
+                                            </div>
+                                            <div class="forced-choice-option-actions">
+                                                <label class="forced-choice-radio-card is-most <?= $selectedMost === $optionId ? 'is-selected' : '' ?>">
+                                                    <input type="radio" name="forced-most-<?= (int) $question['attempt_question_id'] ?>" value="<?= $optionId ?>" aria-label="<?= e('Most: ' . $optionKey . '. ' . $option['option_text']) ?>" data-forced-most data-answer-control <?= $selectedMost === $optionId ? 'checked' : '' ?>>
+                                                    <span class="forced-choice-radio-indicator" aria-hidden="true"></span><span class="forced-choice-radio-copy"><strong>Most</strong><small>Paling menggambarkan saya</small></span>
+                                                </label>
+                                                <label class="forced-choice-radio-card is-least <?= $selectedLeast === $optionId ? 'is-selected' : '' ?>">
+                                                    <input type="radio" name="forced-least-<?= (int) $question['attempt_question_id'] ?>" value="<?= $optionId ?>" aria-label="<?= e('Least: ' . $optionKey . '. ' . $option['option_text']) ?>" data-forced-least data-answer-control <?= $selectedLeast === $optionId ? 'checked' : '' ?>>
+                                                    <span class="forced-choice-radio-indicator" aria-hidden="true"></span><span class="forced-choice-radio-copy"><strong>Least</strong><small>Paling tidak menggambarkan saya</small></span>
+                                                </label>
+                                            </div>
+                                        </article>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php else: ?>
+                                <div class="forced-choice-grid">
+                                    <label><span><b class="forced-most-mark">M</b><span><strong>Paling menggambarkan saya</strong><small>Most</small></span></span><select data-forced-most data-answer-control><option value="">Pilih pernyataan…</option><?php foreach ($question['options'] as $option): ?><option value="<?= (int) $option['option_id'] ?>" <?= $selectedMost === (int) $option['option_id'] ? 'selected' : '' ?>><?= e($option['option_key'] . '. ' . $option['option_text']) ?></option><?php endforeach; ?></select></label>
+                                    <label><span><b class="forced-least-mark">L</b><span><strong>Paling tidak menggambarkan saya</strong><small>Least</small></span></span><select data-forced-least data-answer-control><option value="">Pilih pernyataan…</option><?php foreach ($question['options'] as $option): ?><option value="<?= (int) $option['option_id'] ?>" <?= $selectedLeast === (int) $option['option_id'] ? 'selected' : '' ?>><?= e($option['option_key'] . '. ' . $option['option_text']) ?></option><?php endforeach; ?></select></label>
+                                </div>
+                            <?php endif; ?>
+                            <p class="forced-help">Pilih satu pernyataan sebagai Most dan pernyataan lain sebagai Least. Tidak ada jawaban benar atau salah.</p>
                         <?php elseif ($question['question_type'] === 'essay'): ?>
                             <div class="rich-editor-wrap"><div class="rich-toolbar" role="toolbar" aria-label="Format jawaban"><button type="button" data-command="bold" aria-label="Tebal"><svg class="icon"><use href="#x-icon-bold"></use></svg></button><button type="button" data-command="italic" aria-label="Miring"><svg class="icon"><use href="#x-icon-italic"></use></svg></button><button type="button" data-command="insertUnorderedList" aria-label="Daftar"><svg class="icon"><use href="#x-icon-list-ul"></use></svg></button></div><div class="rich-editor" contenteditable="true" role="textbox" aria-multiline="true" data-rich-editor data-answer-control data-placeholder="Tuliskan jawaban Anda di sini…"><?= exam_sanitize_rich_html((string) $question['answer']['text']) ?></div></div>
                         <?php elseif ($question['question_type'] === 'file_upload'): ?>
