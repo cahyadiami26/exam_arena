@@ -11,6 +11,30 @@ Pondasi aplikasi web E-Assessment berbasis **PHP native + MySQL**. Autentikasi t
 - Dua koneksi basis data: basis data aplikasi E-Assessment dan basis data SSO yang berisi tabel `users`. Keduanya boleh berada di mesin yang sama.
 - Web root nantinya diarahkan ke folder `public/`; direktori penyimpanan unggahan harus berada di luar web root.
 
+## Instalasi dan deployment
+
+Ikuti urutan ini pada host Linux/PHP-FPM. Sesuaikan direktori dan nama pengguna web server dengan lingkungan deployment; jangan arahkan web root ke akar repository.
+
+1. **Siapkan runtime.** Pasang PHP 8.1 atau lebih baru dengan `pdo_mysql`, `mbstring`, `dom`, `iconv`, `fileinfo`, dan `openssl`; siapkan MySQL 8.0+ atau MariaDB yang mendukung JSON/InnoDB. Untuk instalasi PDF manual, host juga memerlukan `curl`, `unzip`, dan `sha256sum`. Periksa runtime dan ekstensi dengan `php -v` serta `php -m`.
+2. **Salin source aplikasi.** Checkout/copy repository ke direktori aplikasi, misalnya `/srv/eassessment`. Tidak diperlukan Composer, `composer install`, atau file `.env`; konfigurasi diberikan melalui environment PHP/server.
+3. **Atur web server dan HTTPS.** Arahkan document root ke `/srv/eassessment/public` (folder `public/` pada lokasi aktual), bukan ke akar repository. Aktifkan PHP-FPM dan TLS/HTTPS untuk deployment produksi. Sediakan aturan rewrite hanya jika konfigurasi web server memerlukannya; halaman PHP saat ini dapat diakses melalui nama file seperti `index.php` dan `lobby.php`.
+4. **Siapkan database aplikasi dan SSO.** Buat database E-Assessment dan akun runtime aplikasi, lalu impor `database/schema.sql` sesuai langkah pada bagian [Menyiapkan basis data](#menyiapkan-basis-data). Jalankan impor menggunakan akun deployment yang diizinkan membuat tabel; akun runtime aplikasi cukup memperoleh hak baca/tulis yang diperlukan pada database aplikasi. Buat/siapkan akun SSO terpisah dengan hak `SELECT` saja pada tabel `users` dan kolom yang tercantum pada bagian basis data. Jangan mengubah skema atau password SSO.
+5. **Pasang konfigurasi environment.** Isi variabel pada bagian [Konfigurasi](#konfigurasi) di environment yang benar-benar diwariskan PHP-FPM (misalnya konfigurasi pool PHP-FPM atau mekanisme rahasia server). Jangan menaruh password database di Git atau di dalam `public/`. Cocokkan `APP_URL`, `SSO_TARGET_SYSTEM`, serta `SSO_LOGIN_URL`; untuk produksi di domain LJU gunakan `SESSION_COOKIE_DOMAIN=.lju.co.id` dan HTTPS. Kosongkan domain cookie hanya untuk pengembangan lokal.
+6. **Siapkan penyimpanan privat.** Dari akar repository, buat `storage/` dan berikan kepemilikan kepada user/group PHP-FPM (contoh Debian/Ubuntu: `sudo install -d -o www-data -g www-data -m 0750 storage`; sesuaikan `www-data` dengan user host). Pastikan `storage/` berada di luar document root dan tidak dapat diakses langsung melalui web. Aplikasi menaruh unggahan dan cache PDF di sana.
+7. **Pasang DOMPDF tanpa Composer.** Dari akar repository, jalankan `./scripts/install_dompdf.sh`. Skrip menempatkan pustaka di `lib/dompdf/`; folder itu memang tidak dilacak Git. Jalankan skrip pada setiap host deployment atau salin hasil instalasi yang sudah diverifikasi. Bila host tidak memiliki akses keluar, jalankan installer di host/build environment yang diizinkan lalu transfer folder tersebut secara aman.
+8. **Muat ulang PHP-FPM/web server.** Restart atau reload layanan agar environment baru terbaca, lalu pastikan log PHP-FPM tidak menunjukkan error konfigurasi atau izin tulis.
+9. **Lakukan pemeriksaan awal.** Dengan environment konfigurasi tersedia di shell, jalankan pemeriksaan baca-saja berikut:
+
+   ```sh
+   php -l public/index.php
+   php -r 'require "app/database.php"; db(); sso_db(); echo "Kedua koneksi database OK", PHP_EOL;'
+   php -r 'require "app/dompdf_loader.php"; if (!app_load_dompdf()) { fwrite(STDERR, "DOMPDF belum siap", PHP_EOL); exit(1); } echo "DOMPDF siap", PHP_EOL;'
+   ```
+
+   Environment CLI harus sama dengan konfigurasi yang dibaca PHP-FPM; jangan menyalin password ke perintah atau riwayat shell. Setelah itu buka `APP_URL`: tanpa sesi SSO, pengguna seharusnya diarahkan ke Portal SSO. Uji login, lobby, menu sesuai peran HR/Admin, dan ekspor PDF setelah DOMPDF siap. Aplikasi tidak menyediakan kredensial database default.
+
+Untuk pembaruan berikutnya, deploy source baru tanpa menyalin direktori `storage/` atau menghapus unggahan/cache privat. Cadangkan database dan `storage/` sesuai kebijakan operasional sebelum melakukan perubahan skema atau pemeliharaan.
+
 ## Menyiapkan basis data
 
 Buat basis data khusus E-Assessment, kemudian impor skema dari folder tersebut:
