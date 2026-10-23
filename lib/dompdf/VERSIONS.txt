@@ -1,0 +1,5 @@
+dompdf 3.1.6
+php-font-lib 1.0.2
+php-svg-lib 1.0.2
+masterminds/html5 2.11.0
+sabberworm/php-css-parser 9.5.0

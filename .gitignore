@@ -6,8 +6,7 @@
 /storage/*
 !/storage/.gitkeep
 
-# Manually installed third-party PDF library and transient installer staging
-/lib/dompdf/
+# Transient installer staging for the bundled manual PDF library
 /lib/.dompdf-stage.*/
 
 # Common editor/OS files
