@@ -231,6 +231,12 @@ $user = app_user();
 $displayName = (string) ($user['name'] ?? 'Pengguna');
 $avatarUrl = app_avatar_url();
 $isManualScore = $selectedReview !== null && in_array($selectedReview['review_type'], ['essay', 'practical'], true);
+$isPapiReview = $selectedReview !== null && $selectedReview['review_type'] === 'papi';
+$isReview360 = $selectedReview !== null && $selectedReview['review_type'] === 'review_360';
+$isParticipantReview = $isPapiReview || $isReview360;
+$detailParticipantName = $isReview360 && trim((string) ($selectedReview['subject_name'] ?? '')) !== ''
+    ? (string) $selectedReview['subject_name']
+    : (string) ($selectedReview['participant_name'] ?? '');
 $selectedStatus = (string) ($selectedReview['review_status'] ?? '');
 $papiProfileScores = $selectedReview !== null && $selectedReview['review_type'] === 'papi'
     ? assessment_papi_profile_scores($selectedReview['papi_scores'] ?? [])
@@ -293,7 +299,7 @@ $inputValue = static function (string $field, mixed $stored = null) use ($formIn
     <div class="ab-breadcrumb"><a href="../index.php">Dashboard</a><span>›</span><strong>Portal Penilai HR</strong></div>
     <section class="ab-hero rv-hero">
         <span class="ab-hero-icon"><svg class="icon"><use href="#rv-check"></use></svg></span>
-        <div class="ab-hero-copy"><span class="ab-eyebrow">PENILAIAN &amp; VERIFIKASI</span><h1>Portal Penilai HR</h1><p>Nilai jawaban esai dan praktik; catat rekomendasi serta catatan untuk PAPI, psikometri, dan review 360°.</p></div>
+        <div class="ab-hero-copy"><span class="ab-eyebrow">PENILAIAN &amp; VERIFIKASI</span><h1>Portal Penilai HR</h1><p>Tinjau jawaban esai dan praktik; nilai profil PAPI atau respons 360° secara terkumpul per peserta/subjek, lalu simpan review dan rekomendasi internal HR.</p></div>
         <span class="ab-hero-orbit" aria-hidden="true"></span>
     </section>
     <div class="ab-tabs">
@@ -314,7 +320,7 @@ $inputValue = static function (string $field, mixed $stored = null) use ($formIn
 
     <div class="rv-layout">
         <section class="ab-panel rv-queue-panel" aria-labelledby="review-queue-heading">
-            <div class="ab-panel-heading"><div><span class="ab-kicker">ANTREAN REVIEW</span><h2 id="review-queue-heading">Item penilaian</h2><p>Menampilkan maksimal 250 item sesuai filter.</p></div><span class="rv-queue-count"><?= number_format(count($queue), 0, ',', '.') ?> item</span></div>
+            <div class="ab-panel-heading"><div><span class="ab-kicker">ANTREAN REVIEW</span><h2 id="review-queue-heading">Review peserta</h2><p>PAPI dan Review360 dikelompokkan per peserta atau subjek; jenis lain tetap mengikuti alur per item. Maksimal 250 review sesuai filter.</p></div><span class="rv-queue-count"><?= number_format(count($queue), 0, ',', '.') ?> review</span></div>
             <form class="rv-filter-form" method="get" action="reviews.php">
                 <label class="ab-field"><span>Status</span><select name="status"><option value="open" <?= $statusFilter === 'open' ? 'selected' : '' ?>>Belum selesai</option><option value="completed" <?= $statusFilter === 'completed' ? 'selected' : '' ?>>Selesai</option><option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>Semua status</option></select></label>
                 <label class="ab-field"><span>Jenis review</span><select name="type"><option value="all" <?= $typeFilter === 'all' ? 'selected' : '' ?>>Semua jenis</option><?php foreach (array_slice($validTypes, 1) as $reviewType): ?><option value="<?= e($reviewType) ?>" <?= $typeFilter === $reviewType ? 'selected' : '' ?>><?= e(review_page_type_label($reviewType)) ?></option><?php endforeach; ?></select></label>
@@ -345,17 +351,49 @@ $inputValue = static function (string $field, mixed $stored = null) use ($formIn
 
         <section class="ab-panel rv-detail-panel" id="review-detail" aria-labelledby="review-detail-heading">
             <?php if ($selectedReview === null): ?>
-                <div class="ab-empty rv-detail-empty"><span><svg class="icon"><use href="#rv-file"></use></svg></span><strong>Pilih item penilaian</strong><p>Pilih jawaban pada antrean untuk melihat konteks soal, respons peserta, dan formulir review.</p></div>
+                <div class="ab-empty rv-detail-empty"><span><svg class="icon"><use href="#rv-file"></use></svg></span><strong>Pilih review peserta</strong><p>Pilih entri pada antrean untuk melihat profil atau seluruh jawaban pada grup, lalu isi review dan rekomendasi HR.</p></div>
             <?php else: ?>
-                <div class="ab-panel-heading rv-detail-heading"><div><span class="ab-kicker"><?= e(review_page_type_label((string) $selectedReview['review_type'])) ?></span><h2 id="review-detail-heading"><?= e($selectedReview['participant_name']) ?></h2><p><?= e($selectedReview['schedule_name']) ?> · <?= e($selectedReview['package_name']) ?> · Percobaan <?= (int) $selectedReview['attempt_number'] ?></p></div><span class="rv-status <?= e(review_page_status_class($selectedStatus)) ?>"><?= e(review_page_status_label($selectedStatus)) ?></span></div>
+                <div class="ab-panel-heading rv-detail-heading"><div><span class="ab-kicker"><?= e(review_page_type_label((string) $selectedReview['review_type'])) ?></span><h2 id="review-detail-heading"><?= e($detailParticipantName) ?></h2><p><?= $isReview360 ? 'Penilai: ' . e($selectedReview['participant_name']) . ' · ' : '' ?><?= e($selectedReview['schedule_name']) ?> · <?= e($selectedReview['package_name']) ?> · Percobaan <?= (int) $selectedReview['attempt_number'] ?></p></div><span class="rv-status <?= e(review_page_status_class($selectedStatus)) ?>"><?= e(review_page_status_label($selectedStatus)) ?></span></div>
                 <div class="rv-context-grid">
-                    <div><small>PESERTA</small><strong><?= e($selectedReview['participant_name']) ?></strong><span><?= e($selectedReview['participant_email'] ?: ($selectedReview['participant_type'] === 'employee' ? review_page_unit($selectedReview) : 'Kandidat eksternal')) ?></span></div>
+                    <div><small><?= $isReview360 ? 'PENILAI / PENGISI' : 'PESERTA' ?></small><strong><?= e($selectedReview['participant_name']) ?></strong><span><?= e($selectedReview['participant_email'] ?: ($selectedReview['participant_type'] === 'employee' ? review_page_unit($selectedReview) : 'Kandidat eksternal')) ?></span></div>
                     <div><small>JADWAL</small><strong><?= e($selectedReview['schedule_code']) ?></strong><span><?= e($selectedReview['schedule_name']) ?></span></div>
                     <?php if ($selectedReview['subject_name'] !== ''): ?><div><small>SUBJEK 360°</small><strong><?= e($selectedReview['subject_name']) ?></strong><span>Respons reviewer untuk subjek ini</span></div><?php endif; ?>
                     <div><small>DIAJUKAN</small><strong><?= e(review_page_date((string) $selectedReview['created_at'])) ?></strong><span><?= e($selectedReview['module_name'] ?: 'Review sesi') ?></span></div>
                 </div>
 
-                <?php if ($selectedReview['question_id'] !== null): ?>
+                <?php if ($isParticipantReview): ?>
+                    <article class="rv-answer-card rv-group-answer-card">
+                        <div class="rv-section-kicker"><?= $isPapiReview ? 'JAWABAN PAPI PER PESERTA' : 'JAWABAN 360° PER SUBJEK' ?></div>
+                        <?php if ($selectedReview['review_answers'] === []): ?>
+                            <p class="rv-answer-empty">Belum ada jawaban tersimpan untuk review ini.</p>
+                        <?php else: ?>
+                            <div class="rv-group-answer-list">
+                                <?php foreach ($selectedReview['review_answers'] as $answerIndex => $answer): ?>
+                                    <section class="rv-group-answer-item">
+                                        <div class="rv-group-answer-heading"><strong><?= $isPapiReview ? 'ITEM PAPI ' . e($answer['papi_item_code'] ?: str_pad((string) ($answerIndex + 1), 2, '0', STR_PAD_LEFT)) : 'BUTIR ' . str_pad((string) ($answerIndex + 1), 2, '0', STR_PAD_LEFT) ?></strong><span><?= e($answer['module_name']) ?></span></div>
+                                        <h3><?= nl2br(e((string) $answer['question_text'])) ?></h3>
+                                        <?php if ($answer['instructions']): ?><div class="rv-question-note"><strong>Instruksi</strong><p><?= nl2br(e((string) $answer['instructions'])) ?></p></div><?php endif; ?>
+                                        <?php if ($answer['question_image_path']): ?><img class="rv-question-image" src="reviews.php?asset_review_id=<?= (int) $selectedReview['review_id'] ?>&amp;asset_type=question_image&amp;asset_record_id=<?= (int) $answer['question_id'] ?>" alt="<?= e($answer['question_image_alt'] ?: 'Ilustrasi soal') ?>" loading="lazy"><?php endif; ?>
+                                        <?php if ($answer['rubric']): ?><div class="rv-rubric"><strong>Rubrik penilaian</strong><p><?= nl2br(e((string) $answer['rubric'])) ?></p></div><?php endif; ?>
+                                        <?php if ($answer['reference_file_path']): ?><a class="rv-reference-link" href="reviews.php?asset_review_id=<?= (int) $selectedReview['review_id'] ?>&amp;asset_type=reference&amp;asset_record_id=<?= (int) $answer['question_id'] ?>"><svg class="icon"><use href="#rv-download"></use></svg><span><?= e($answer['reference_file_name'] ?: 'Buka file referensi soal') ?><small><?= e($answer['reference_mime_type'] ?: 'File referensi') ?></small></span></a><?php endif; ?>
+                                        <?php if ($answer['question_type'] === 'essay' && trim((string) $answer['answer_text']) !== ''): ?>
+                                            <div class="rv-answer-rich"><?= exam_sanitize_rich_html((string) $answer['answer_text']) ?></div>
+                                        <?php elseif (trim((string) $answer['answer_text']) !== ''): ?>
+                                            <div class="rv-answer-plain"><?= nl2br(e((string) $answer['answer_text'])) ?></div>
+                                        <?php endif; ?>
+                                        <?php if ($answer['selected_options'] !== []): ?>
+                                            <ul class="rv-selected-options"><?php foreach ($answer['selected_options'] as $option): ?><li><span><?= e($option['label']) ?></span><strong><?= e($option['option_key']) ?>.</strong><div><?= nl2br(e($option['option_text'])) ?><?php if ($option['option_image_path'] !== ''): ?><img class="rv-option-image" src="reviews.php?asset_review_id=<?= (int) $selectedReview['review_id'] ?>&amp;asset_type=option_image&amp;asset_record_id=<?= (int) $option['id'] ?>" alt="" loading="lazy"><?php endif; ?><?php if ($option['aspect_code'] !== ''): ?><small>Aspek <?= e($option['aspect_code']) ?></small><?php endif; ?></div></li><?php endforeach; ?></ul>
+                                        <?php endif; ?>
+                                        <?php if ($answer['files'] !== []): ?>
+                                            <div class="rv-files"><strong>Berkas jawaban</strong><?php foreach ($answer['files'] as $file): ?><a href="reviews.php?file_review_id=<?= (int) $selectedReview['review_id'] ?>&amp;file_id=<?= (int) $file['file_id'] ?>"><svg class="icon"><use href="#rv-download"></use></svg><span><?= e($file['original_file_name']) ?><small><?= e(strtoupper((string) $file['mime_type'])) ?> · <?= e(review_page_file_size($file['file_size_bytes'])) ?></small></span></a><?php endforeach; ?></div>
+                                        <?php endif; ?>
+                                        <?php if (trim((string) $answer['answer_text']) === '' && $answer['selected_options'] === [] && $answer['files'] === []): ?><p class="rv-answer-empty">Tidak ada respons tersimpan pada butir ini.</p><?php endif; ?>
+                                    </section>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </article>
+                <?php elseif ($selectedReview['question_id'] !== null): ?>
                     <article class="rv-question-card">
                         <div class="rv-section-kicker">KONTEKS SOAL</div>
                         <h3><?= nl2br(e((string) $selectedReview['question_text'])) ?></h3>
@@ -426,19 +464,19 @@ $inputValue = static function (string $field, mixed $stored = null) use ($formIn
                 <?php else: ?>
                     <form class="rv-review-form" method="post" action="<?= e($reviewActionUrl) ?>">
                         <?= app_csrf_input() ?><input type="hidden" name="action" value="save_review"><input type="hidden" name="review_id" value="<?= (int) $selectedReview['review_id'] ?>">
-                        <div class="rv-form-heading"><div><span class="rv-section-kicker">FORM PENILAIAN</span><h3><?= $isManualScore ? 'Skor manual' : 'Review kualitatif' ?></h3></div><span><?= $isManualScore ? 'Rentang 0–' . number_format((float) $selectedReview['points'], 2, ',', '.') : 'Skor numerik tidak diterapkan' ?></span></div>
+                        <div class="rv-form-heading"><div><span class="rv-section-kicker">FORM PENILAIAN</span><h3><?= $isPapiReview ? 'Review profil peserta' : ($isReview360 ? 'Review hasil 360° per subjek' : ($isManualScore ? 'Skor manual' : 'Review kualitatif')) ?></h3></div><span><?= $isManualScore ? 'Rentang 0–' . number_format((float) $selectedReview['points'], 2, ',', '.') : 'Skor numerik tidak diterapkan' ?></span></div>
                         <?php if ($isManualScore): ?>
                             <label class="ab-field rv-score-field"><span>Skor untuk jawaban <small>wajib · bobot maksimum <?= e(number_format((float) $selectedReview['points'], 2, ',', '.')) ?></small></span><input type="number" name="score" min="0" max="<?= e((string) $selectedReview['points']) ?>" step="0.01" required value="<?= e($inputValue('score', $selectedReview['review_score'])) ?>" placeholder="0,00"></label>
                         <?php else: ?>
-                            <div class="rv-score-hint"><svg class="icon"><use href="#rv-info"></use></svg><span>Item ini ditutup dengan rekomendasi/catatan assessor, bukan skor angka. Skor mentah PAPI tetap tersimpan terpisah.</span></div>
+                            <div class="rv-score-hint"><svg class="icon"><use href="#rv-info"></use></svg><span><?= $isPapiReview ? 'Review diberikan untuk profil peserta secara utuh, bukan per item. Skor aspek PAPI di bawah adalah skor mentah saja; interpretasi/norma tidak diterapkan otomatis.' : ($isReview360 ? 'Review diberikan sekali untuk seluruh jawaban pada subjek ini, bukan per soal. Berikan catatan internal HR dan rekomendasi.' : 'Item ini ditutup dengan rekomendasi/catatan assessor, bukan skor angka.') ?></span></div>
                         <?php endif; ?>
-                        <label class="ab-field"><span>Rekomendasi <small>opsional</small></span><select name="recommendation"><option value="">Tidak ditetapkan</option><?php foreach (['recommended' => 'Direkomendasikan', 'consider' => 'Dipertimbangkan', 'not_recommended' => 'Tidak direkomendasikan'] as $value => $label): ?><option value="<?= e($value) ?>" <?= $inputValue('recommendation', $selectedReview['recommendation']) === $value ? 'selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
+                        <label class="ab-field"><span>Rekomendasi <small><?= $isParticipantReview ? 'wajib' : 'opsional' ?></small></span><select name="recommendation" <?= $isParticipantReview ? 'required' : '' ?>><option value="">Pilih rekomendasi</option><?php foreach (['recommended' => 'Direkomendasikan', 'consider' => 'Dipertimbangkan', 'not_recommended' => 'Tidak direkomendasikan'] as $value => $label): ?><option value="<?= e($value) ?>" <?= $inputValue('recommendation', $selectedReview['recommendation']) === $value ? 'selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select></label>
                         <div class="ab-form-grid rv-textarea-grid">
                             <label class="ab-field"><span>Kekuatan <small>opsional</small></span><textarea name="strengths" rows="3" maxlength="10000" placeholder="Catat hal yang dilakukan dengan baik."><?= e($inputValue('strengths', $selectedReview['strengths'])) ?></textarea></label>
                             <label class="ab-field"><span>Area pengembangan <small>opsional</small></span><textarea name="development_areas" rows="3" maxlength="10000" placeholder="Catat area yang perlu ditingkatkan."><?= e($inputValue('development_areas', $selectedReview['development_areas'])) ?></textarea></label>
                         </div>
-                        <label class="ab-field"><span>Catatan assessor <small><?= $isManualScore ? 'opsional' : 'isi catatan atau rekomendasi untuk menutup item' ?></small></span><textarea name="notes" rows="4" maxlength="20000" placeholder="Tambahkan alasan penilaian atau konteks yang perlu dicatat."><?= e($inputValue('notes', $selectedReview['notes'])) ?></textarea></label>
-                        <div class="rv-form-footer"><span>Setelah disimpan, item ini terkunci. Skor total sesi dikonsolidasikan setelah seluruh item review peserta selesai.</span><button type="submit" class="ab-primary-button"><svg class="icon"><use href="#rv-check"></use></svg>Simpan &amp; selesaikan review</button></div>
+                        <label class="ab-field"><span><?= $isParticipantReview ? 'Catatan review HR' : 'Catatan assessor' ?> <small><?= $isParticipantReview ? 'wajib · internal HR' : ($isManualScore ? 'opsional' : 'isi catatan atau rekomendasi untuk menutup item') ?></small></span><textarea name="notes" rows="4" maxlength="20000" <?= $isParticipantReview ? 'required' : '' ?> placeholder="Tambahkan ringkasan review dan konteks rekomendasi. Catatan ini hanya untuk HR."><?= e($inputValue('notes', $selectedReview['notes'])) ?></textarea></label>
+                        <div class="rv-form-footer"><span><?= $isParticipantReview ? 'Review dan rekomendasi ini disimpan untuk peserta/subjek dan tidak ditampilkan kepada peserta.' : 'Setelah disimpan, item ini terkunci. Skor total sesi dikonsolidasikan setelah seluruh item review peserta selesai.' ?></span><button type="submit" class="ab-primary-button"><svg class="icon"><use href="#rv-check"></use></svg>Simpan &amp; selesaikan review</button></div>
                     </form>
                 <?php endif; ?>
             <?php endif; ?>

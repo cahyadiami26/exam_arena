@@ -1061,11 +1061,9 @@ function exam_finalize_attempt(int $attemptId, bool $autoSubmitted = false): voi
             "INSERT INTO assessment_reviews (attempt_id, answer_id, review_type, status)
              SELECT aa.attempt_id, aa.id,
                     CASE
-                        WHEN m.module_kind = 'review_360' THEN 'review_360'
                         WHEN q.question_type = 'essay' THEN 'essay'
                         WHEN q.question_type = 'file_upload' THEN 'practical'
-                        WHEN q.question_type = 'forced_choice' AND (q.papi_item_code IS NOT NULL OR q.category = 'PAPI_KOSTICK') THEN 'papi'
-                        WHEN q.question_type = 'forced_choice' THEN 'psychometric'
+                        ELSE 'psychometric'
                     END,
                     'pending'
              FROM attempt_answers aa
@@ -1073,18 +1071,70 @@ function exam_finalize_attempt(int $attemptId, bool $autoSubmitted = false): voi
              INNER JOIN assessment_modules m ON m.id = aa.module_id
              WHERE aa.attempt_id = :attempt_id
                AND aa.review_status = 'pending'
-               AND (q.question_type = 'forced_choice'
-                    OR (q.question_type = 'essay' AND TRIM(COALESCE(aa.answer_text, '')) <> '')
+               AND m.module_kind <> 'review_360'
+               AND (
+                    (q.question_type = 'essay' AND TRIM(COALESCE(aa.answer_text, '')) <> '')
                     OR (q.question_type = 'file_upload' AND EXISTS (
                         SELECT 1 FROM attempt_answer_files f WHERE f.answer_id = aa.id
                     ))
-                    OR m.module_kind = 'review_360')
+                    OR (q.question_type = 'forced_choice'
+                        AND q.papi_item_code IS NULL AND COALESCE(q.category, '') <> 'PAPI_KOSTICK')
+               )
                AND NOT EXISTS (
                     SELECT 1 FROM assessment_reviews existing
                     WHERE existing.attempt_id = aa.attempt_id AND existing.answer_id = aa.id
                )"
         );
         $queue->execute(['attempt_id' => $attemptId]);
+
+        // PAPI is reviewed once per attempt; the report contains all selected statements and raw aspect scores.
+        $papiReview = $pdo->prepare(
+            "INSERT INTO assessment_reviews (attempt_id, answer_id, review_type, status)
+             SELECT :attempt_id_insert, NULL, 'papi', 'pending'
+             WHERE EXISTS (
+                 SELECT 1 FROM attempt_answers aa
+                 INNER JOIN question_bank q ON q.id = aa.question_id
+                 WHERE aa.attempt_id = :attempt_id_answers
+                   AND q.question_type = 'forced_choice'
+                   AND (q.papi_item_code IS NOT NULL OR q.category = 'PAPI_KOSTICK')
+             )
+               AND NOT EXISTS (
+                 SELECT 1 FROM assessment_reviews existing
+                 WHERE existing.attempt_id = :attempt_id_existing AND existing.review_type = 'papi'
+             )"
+        );
+        $papiReview->execute([
+            'attempt_id_insert' => $attemptId,
+            'attempt_id_answers' => $attemptId,
+            'attempt_id_existing' => $attemptId,
+        ]);
+
+        // A 360 review is one HR review per assigned subject, not one review per question.
+        $review360Queue = $pdo->prepare(
+            "INSERT INTO assessment_reviews (attempt_id, answer_id, review_type, status)
+             SELECT :attempt_id_insert, grouped_answers.first_answer_id, 'review_360', 'pending'
+             FROM (
+                 SELECT aa.review_assignment_id, MIN(aa.id) AS first_answer_id
+                 FROM attempt_answers aa
+                 INNER JOIN assessment_modules m ON m.id = aa.module_id
+                 WHERE aa.attempt_id = :attempt_id_answers
+                   AND m.module_kind = 'review_360'
+                   AND aa.review_assignment_id IS NOT NULL
+                 GROUP BY aa.review_assignment_id
+             ) AS grouped_answers
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM assessment_reviews existing
+                 LEFT JOIN attempt_answers existing_answer ON existing_answer.id = existing.answer_id
+                 WHERE existing.attempt_id = :attempt_id_existing
+                   AND existing.review_type = 'review_360'
+                   AND existing_answer.review_assignment_id = grouped_answers.review_assignment_id
+             )"
+        );
+        $review360Queue->execute([
+            'attempt_id_insert' => $attemptId,
+            'attempt_id_answers' => $attemptId,
+            'attempt_id_existing' => $attemptId,
+        ]);
 
         // PAPI raw aspect totals: Most contributes +1 and Least contributes -1.
         $papiAnswers = $pdo->prepare(

@@ -45,19 +45,42 @@ function assessment_review_employee_profiles(array $rawIds): array
 function assessment_review_summary(): array
 {
     assessment_review_require_hr();
-    $row = db()->query(
+    $normal = db()->query(
         "SELECT COUNT(*) AS total,
                 COALESCE(SUM(status IN ('pending', 'in_progress')), 0) AS open_count,
                 COALESCE(SUM(status = 'completed'), 0) AS completed_count,
                 COALESCE(SUM(status IN ('pending', 'in_progress') AND review_type IN ('essay', 'practical')), 0) AS manual_count
-         FROM assessment_reviews"
+         FROM assessment_reviews
+         WHERE review_type NOT IN ('papi', 'review_360')"
+    )->fetch() ?: [];
+    $papi = db()->query(
+        "SELECT COUNT(*) AS total,
+                COALESCE(SUM(has_open = 1), 0) AS open_count,
+                COALESCE(SUM(has_open = 0), 0) AS completed_count
+         FROM (
+             SELECT attempt_id, MAX(status IN ('pending', 'in_progress')) AS has_open
+             FROM assessment_reviews WHERE review_type = 'papi' GROUP BY attempt_id
+         ) AS grouped_papi"
+    )->fetch() ?: [];
+    $review360 = db()->query(
+        "SELECT COUNT(*) AS total,
+                COALESCE(SUM(has_open = 1), 0) AS open_count,
+                COALESCE(SUM(has_open = 0), 0) AS completed_count
+         FROM (
+             SELECT r.attempt_id, COALESCE(aa.review_assignment_id, 0) AS assignment_key,
+                    MAX(r.status IN ('pending', 'in_progress')) AS has_open
+             FROM assessment_reviews r
+             LEFT JOIN attempt_answers aa ON aa.id = r.answer_id
+             WHERE r.review_type = 'review_360'
+             GROUP BY r.attempt_id, COALESCE(aa.review_assignment_id, 0)
+         ) AS grouped_360"
     )->fetch() ?: [];
 
     return [
-        'total' => (int) ($row['total'] ?? 0),
-        'open' => (int) ($row['open_count'] ?? 0),
-        'completed' => (int) ($row['completed_count'] ?? 0),
-        'manual' => (int) ($row['manual_count'] ?? 0),
+        'total' => (int) ($normal['total'] ?? 0) + (int) ($papi['total'] ?? 0) + (int) ($review360['total'] ?? 0),
+        'open' => (int) ($normal['open_count'] ?? 0) + (int) ($papi['open_count'] ?? 0) + (int) ($review360['open_count'] ?? 0),
+        'completed' => (int) ($normal['completed_count'] ?? 0) + (int) ($papi['completed_count'] ?? 0) + (int) ($review360['completed_count'] ?? 0),
+        'manual' => (int) ($normal['manual_count'] ?? 0),
     ];
 }
 
@@ -89,8 +112,9 @@ function assessment_review_list(string $statusFilter = 'open', string $typeFilte
                    r.created_at, r.reviewed_at, a.id AS attempt_id, a.attempt_number,
                    a.status AS attempt_status, sp.participant_type, sp.sso_user_id,
                    ec.name AS candidate_name, s.name AS schedule_name, s.code AS schedule_code,
-                   p.name AS package_name, aa.question_id, q.category, q.question_type,
-                   LEFT(q.question_text, 220) AS question_preview, ra.subject_user_id
+                   p.name AS package_name, aa.question_id, aa.review_assignment_id,
+                   q.category, q.question_type, LEFT(q.question_text, 220) AS question_preview,
+                   ra.subject_user_id
             FROM assessment_reviews r
             INNER JOIN exam_attempts a ON a.id = r.attempt_id
             INNER JOIN schedule_participants sp ON sp.id = a.schedule_participant_id
@@ -102,11 +126,51 @@ function assessment_review_list(string $statusFilter = 'open', string $typeFilte
             LEFT JOIN review_assignments ra ON ra.id = aa.review_assignment_id
             $whereSql
             ORDER BY CASE r.status WHEN 'pending' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+                     CASE WHEN r.review_type IN ('papi', 'review_360') AND r.status = 'completed' THEN r.reviewed_at END DESC,
                      r.created_at ASC, r.id ASC
-            LIMIT 250";
+            LIMIT 10000";
     $statement = db()->prepare($sql);
     $statement->execute($parameters);
     $rows = $statement->fetchAll();
+
+    $groupedRows = [];
+    foreach ($rows as $row) {
+        $reviewType = (string) $row['review_type'];
+        $attemptId = (int) $row['attempt_id'];
+        if ($reviewType === 'papi') {
+            $groupKey = 'papi:' . $attemptId;
+        } elseif ($reviewType === 'review_360') {
+            $groupKey = 'review_360:' . $attemptId . ':' . (int) ($row['review_assignment_id'] ?? 0);
+        } else {
+            $groupKey = 'review:' . (int) $row['review_id'];
+        }
+        if (!isset($groupedRows[$groupKey])) {
+            $groupedRows[$groupKey] = $row;
+            $groupedRows[$groupKey]['group_review_count'] = 0;
+            $groupedRows[$groupKey]['review_status'] = 'completed';
+        }
+        $groupedRows[$groupKey]['group_review_count']++;
+        if ($row['review_status'] === 'pending'
+            || ($row['review_status'] === 'in_progress' && $groupedRows[$groupKey]['review_status'] !== 'pending')) {
+            $groupedRows[$groupKey]['review_status'] = (string) $row['review_status'];
+        }
+        if ($reviewType === 'papi') {
+            $groupedRows[$groupKey]['question_preview'] = 'Profil dan jawaban PAPI peserta';
+        } elseif ($reviewType === 'review_360') {
+            $groupedRows[$groupKey]['question_preview'] = 'Review jawaban per subjek 360°';
+        }
+    }
+    $rows = array_values($groupedRows);
+    usort($rows, static function (array $left, array $right): int {
+        $priority = ['pending' => 0, 'in_progress' => 1, 'completed' => 2];
+        $statusOrder = ($priority[$left['review_status']] ?? 2) <=> ($priority[$right['review_status']] ?? 2);
+        if ($statusOrder !== 0) {
+            return $statusOrder;
+        }
+        $createdOrder = strcmp((string) $left['created_at'], (string) $right['created_at']);
+        return $createdOrder !== 0 ? $createdOrder : ((int) $left['review_id'] <=> (int) $right['review_id']);
+    });
+    $rows = array_slice($rows, 0, 250);
 
     $employeeIds = [];
     foreach ($rows as $row) {
@@ -142,6 +206,126 @@ function assessment_review_list(string $statusFilter = 'open', string $typeFilte
     unset($row);
 
     return $rows;
+}
+
+function assessment_review_group_answers(array $review): array
+{
+    $attemptId = (int) ($review['attempt_id'] ?? 0);
+    $reviewType = (string) ($review['review_type'] ?? '');
+    if ($attemptId < 1) {
+        return [];
+    }
+    if ($reviewType === 'papi') {
+        $scopeSql = "q.question_type = 'forced_choice'
+                     AND (q.papi_item_code IS NOT NULL OR q.category = 'PAPI_KOSTICK')";
+        $parameters = ['attempt_id' => $attemptId];
+    } elseif ($reviewType === 'review_360') {
+        $assignmentId = (int) ($review['review_assignment_id'] ?? 0);
+        if ($assignmentId < 1) {
+            return [];
+        }
+        $scopeSql = "m.module_kind = 'review_360' AND aa.review_assignment_id = :review_assignment_id";
+        $parameters = ['attempt_id' => $attemptId, 'review_assignment_id' => $assignmentId];
+    } else {
+        return [];
+    }
+
+    $statement = db()->prepare(
+        "SELECT aa.id AS answer_id, aa.question_id, aa.answer_text, aa.answer_payload,
+                q.question_type, q.category, q.question_text, q.instructions, q.rubric,
+                q.question_image_path, q.question_image_alt,
+                q.reference_file_path, q.reference_file_name, q.reference_mime_type,
+                q.papi_item_code, q.papi_aspect_code, m.name AS module_name
+         FROM attempt_answers aa
+         INNER JOIN question_bank q ON q.id = aa.question_id
+         INNER JOIN assessment_modules m ON m.id = aa.module_id
+         LEFT JOIN module_questions mq ON mq.module_id = aa.module_id AND mq.question_id = aa.question_id
+         WHERE aa.attempt_id = :attempt_id AND $scopeSql
+         ORDER BY aa.module_id, COALESCE(mq.sort_order, 65535), aa.question_id"
+    );
+    $statement->execute($parameters);
+    $answers = $statement->fetchAll();
+    if ($answers === []) {
+        return [];
+    }
+
+    $questionIds = array_values(array_unique(array_map('intval', array_column($answers, 'question_id'))));
+    $questionOptions = [];
+    if ($questionIds !== []) {
+        $placeholders = implode(', ', array_fill(0, count($questionIds), '?'));
+        $optionsStatement = db()->prepare(
+            "SELECT question_id, id AS option_id, option_key, option_text,
+                    papi_aspect_code, option_image_path
+             FROM question_options WHERE question_id IN ($placeholders)
+             ORDER BY question_id, sort_order, id"
+        );
+        $optionsStatement->execute($questionIds);
+        foreach ($optionsStatement->fetchAll() as $option) {
+            $questionOptions[(int) $option['question_id']][(int) $option['option_id']] = $option;
+        }
+    }
+
+    $answerIds = array_values(array_unique(array_map('intval', array_column($answers, 'answer_id'))));
+    $filesByAnswer = [];
+    if ($answerIds !== []) {
+        $placeholders = implode(', ', array_fill(0, count($answerIds), '?'));
+        $filesStatement = db()->prepare(
+            "SELECT answer_id, id AS file_id, original_file_name, mime_type,
+                    file_size_bytes, uploaded_at
+             FROM attempt_answer_files WHERE answer_id IN ($placeholders)
+             ORDER BY answer_id, uploaded_at, id"
+        );
+        $filesStatement->execute($answerIds);
+        foreach ($filesStatement->fetchAll() as $file) {
+            $filesByAnswer[(int) $file['answer_id']][] = $file;
+        }
+    }
+
+    foreach ($answers as &$answer) {
+        $payload = $answer['answer_payload'] !== null
+            ? json_decode((string) $answer['answer_payload'], true)
+            : [];
+        $payload = is_array($payload) ? $payload : [];
+        $roles = [];
+        $mostId = (int) ($payload['most_option_id'] ?? 0);
+        $leastId = (int) ($payload['least_option_id'] ?? 0);
+        if ($mostId > 0) {
+            $roles[$mostId] = 'Paling menggambarkan (Most)';
+        }
+        if ($leastId > 0) {
+            $roles[$leastId] = 'Paling tidak menggambarkan (Least)';
+        }
+        foreach (is_array($payload['selected_option_ids'] ?? null) ? $payload['selected_option_ids'] : [] as $optionId) {
+            $optionId = (int) $optionId;
+            if ($optionId > 0) {
+                $roles[$optionId] = 'Dipilih';
+            }
+        }
+        $singleId = (int) ($payload['selected_option_id'] ?? 0);
+        if ($singleId > 0) {
+            $roles[$singleId] = 'Dipilih';
+        }
+        $answer['selected_options'] = [];
+        foreach ($roles as $optionId => $role) {
+            $option = $questionOptions[(int) $answer['question_id']][(int) $optionId] ?? null;
+            if ($option === null) {
+                continue;
+            }
+            $answer['selected_options'][] = [
+                'id' => (int) $option['option_id'],
+                'label' => $role,
+                'option_key' => (string) $option['option_key'],
+                'option_text' => (string) $option['option_text'],
+                'aspect_code' => (string) ($option['papi_aspect_code'] ?? ''),
+                'option_image_path' => (string) ($option['option_image_path'] ?? ''),
+            ];
+        }
+        $answer['answer_text'] = (string) ($answer['answer_text'] ?? '');
+        $answer['files'] = $filesByAnswer[(int) $answer['answer_id']] ?? [];
+    }
+    unset($answer);
+
+    return $answers;
 }
 
 function assessment_review_get(int $reviewId): ?array
@@ -291,6 +475,9 @@ function assessment_review_get(int $reviewId): ?array
         $scores->execute(['attempt_id' => $review['attempt_id']]);
         $review['papi_scores'] = $scores->fetchAll();
     }
+    $review['review_answers'] = in_array($review['review_type'], ['papi', 'review_360'], true)
+        ? assessment_review_group_answers($review)
+        : [];
 
     return $review;
 }
@@ -357,6 +544,13 @@ function assessment_review_save(int $reviewId, int $reviewerUserId, array $input
             if ($manualScore < 0 || $manualScore > $maximumScore) {
                 throw new DomainException('Skor harus berada di antara 0 dan ' . number_format($maximumScore, 2, ',', '.') . '.');
             }
+        } elseif (in_array($review['review_type'], ['papi', 'review_360'], true)) {
+            if ($recommendation === '') {
+                throw new DomainException('Pilih rekomendasi sebelum menutup review peserta.');
+            }
+            if ($notes === '') {
+                throw new DomainException('Isi catatan review HR sebelum menutup review peserta.');
+            }
         } elseif ($recommendation === '' && $strengths === '' && $development === '' && $notes === '') {
             throw new DomainException('Tambahkan rekomendasi atau catatan assessor sebelum menutup item review ini.');
         }
@@ -380,7 +574,62 @@ function assessment_review_save(int $reviewId, int $reviewerUserId, array $input
             'reviewed_at' => $now,
             'review_id' => $reviewId,
         ]);
-        if ($review['answer_id'] !== null) {
+        $reviewType = (string) $review['review_type'];
+        $assignmentId = (int) ($review['review_assignment_id'] ?? 0);
+        if ($reviewType === 'papi') {
+            $pdo->prepare(
+                "UPDATE assessment_reviews
+                 SET status = 'completed',
+                     reviewer_user_id = COALESCE(reviewer_user_id, :reviewer_user_id),
+                     reviewed_at = COALESCE(reviewed_at, :reviewed_at)
+                 WHERE attempt_id = :attempt_id AND review_type = 'papi'
+                   AND id <> :review_id AND status IN ('pending', 'in_progress')"
+            )->execute([
+                'reviewer_user_id' => $reviewerUserId,
+                'reviewed_at' => $now,
+                'attempt_id' => (int) $review['attempt_id'],
+                'review_id' => $reviewId,
+            ]);
+            $pdo->prepare(
+                "UPDATE attempt_answers aa
+                 INNER JOIN question_bank q ON q.id = aa.question_id
+                 SET aa.review_status = 'reviewed'
+                 WHERE aa.attempt_id = :attempt_id
+                   AND q.question_type = 'forced_choice'
+                   AND (q.papi_item_code IS NOT NULL OR q.category = 'PAPI_KOSTICK')"
+            )->execute(['attempt_id' => (int) $review['attempt_id']]);
+        } elseif ($reviewType === 'review_360') {
+            if ($assignmentId < 1) {
+                throw new DomainException('Penugasan subjek untuk review 360° tidak ditemukan.');
+            }
+            $pdo->prepare(
+                "UPDATE assessment_reviews r
+                 INNER JOIN attempt_answers aa ON aa.id = r.answer_id
+                 SET r.status = 'completed',
+                     r.reviewer_user_id = COALESCE(r.reviewer_user_id, :reviewer_user_id),
+                     r.reviewed_at = COALESCE(r.reviewed_at, :reviewed_at)
+                 WHERE r.attempt_id = :attempt_id AND r.review_type = 'review_360'
+                   AND aa.review_assignment_id = :assignment_id
+                   AND r.id <> :review_id AND r.status IN ('pending', 'in_progress')"
+            )->execute([
+                'reviewer_user_id' => $reviewerUserId,
+                'reviewed_at' => $now,
+                'attempt_id' => (int) $review['attempt_id'],
+                'assignment_id' => $assignmentId,
+                'review_id' => $reviewId,
+            ]);
+            $pdo->prepare(
+                "UPDATE attempt_answers aa
+                 INNER JOIN assessment_modules m ON m.id = aa.module_id
+                 SET aa.review_status = 'reviewed'
+                 WHERE aa.attempt_id = :attempt_id
+                   AND aa.review_assignment_id = :assignment_id
+                   AND m.module_kind = 'review_360'"
+            )->execute([
+                'attempt_id' => (int) $review['attempt_id'],
+                'assignment_id' => $assignmentId,
+            ]);
+        } elseif ($review['answer_id'] !== null) {
             $pdo->prepare(
                 "UPDATE attempt_answers SET manual_score = :manual_score, review_status = 'reviewed'
                  WHERE id = :answer_id AND attempt_id = :attempt_id"
@@ -406,6 +655,32 @@ function assessment_review_save(int $reviewId, int $reviewerUserId, array $input
         );
         $pendingReviews->execute(['attempt_id' => (int) $review['attempt_id']]);
         $pendingReviewCount = (int) $pendingReviews->fetchColumn();
+        $pendingReviewGroups = $pdo->prepare(
+            "SELECT
+                (SELECT COUNT(*) FROM assessment_reviews
+                 WHERE attempt_id = :normal_attempt_id AND status IN ('pending', 'in_progress')
+                   AND review_type NOT IN ('papi', 'review_360'))
+                + (SELECT COUNT(*) FROM (
+                    SELECT attempt_id FROM assessment_reviews
+                    WHERE attempt_id = :papi_attempt_id AND review_type = 'papi'
+                      AND status IN ('pending', 'in_progress')
+                    GROUP BY attempt_id
+                ) AS pending_papi)
+                + (SELECT COUNT(*) FROM (
+                    SELECT r.attempt_id, COALESCE(aa.review_assignment_id, 0) AS assignment_key
+                    FROM assessment_reviews r
+                    LEFT JOIN attempt_answers aa ON aa.id = r.answer_id
+                    WHERE r.attempt_id = :review360_attempt_id AND r.review_type = 'review_360'
+                      AND r.status IN ('pending', 'in_progress')
+                    GROUP BY r.attempt_id, COALESCE(aa.review_assignment_id, 0)
+                ) AS pending_360)"
+        );
+        $pendingReviewGroups->execute([
+            'normal_attempt_id' => (int) $review['attempt_id'],
+            'papi_attempt_id' => (int) $review['attempt_id'],
+            'review360_attempt_id' => (int) $review['attempt_id'],
+        ]);
+        $pendingReviewGroupCount = (int) $pendingReviewGroups->fetchColumn();
         $hasPendingReviews = $pendingReviewCount > 0;
         $attemptStatus = $hasPendingReviews ? 'pending_review' : 'completed';
         $totalScore = $hasPendingReviews ? null : $objectiveScore + ($manualTotal ?? 0.0);
@@ -459,7 +734,7 @@ function assessment_review_save(int $reviewId, int $reviewerUserId, array $input
         return [
             'review_status' => 'completed',
             'attempt_status' => $attemptStatus,
-            'pending_reviews' => $pendingReviewCount,
+            'pending_reviews' => $pendingReviewGroupCount,
         ];
     } catch (Throwable $exception) {
         if ($pdo->inTransaction()) {
@@ -467,6 +742,32 @@ function assessment_review_save(int $reviewId, int $reviewerUserId, array $input
         }
         throw $exception;
     }
+}
+
+/** Build the authorization predicate for a question shown in a per-answer or grouped review. */
+function assessment_review_question_scope_sql(): string
+{
+    return "(
+        (r.review_type = 'papi' AND EXISTS (
+            SELECT 1 FROM attempt_answers group_answer
+            INNER JOIN question_bank group_question ON group_question.id = group_answer.question_id
+            WHERE group_answer.attempt_id = r.attempt_id AND group_question.id = q.id
+              AND (group_question.papi_item_code IS NOT NULL OR group_question.category = 'PAPI_KOSTICK')
+        ))
+        OR (r.review_type = 'review_360' AND EXISTS (
+            SELECT 1 FROM attempt_answers review_anchor
+            INNER JOIN attempt_answers group_answer
+                ON group_answer.attempt_id = r.attempt_id
+               AND group_answer.review_assignment_id = review_anchor.review_assignment_id
+            INNER JOIN assessment_modules group_module ON group_module.id = group_answer.module_id
+            WHERE review_anchor.id = r.answer_id AND review_anchor.review_assignment_id IS NOT NULL
+              AND group_answer.question_id = q.id AND group_module.module_kind = 'review_360'
+        ))
+        OR (r.review_type NOT IN ('papi', 'review_360') AND EXISTS (
+            SELECT 1 FROM attempt_answers direct_answer
+            WHERE direct_answer.id = r.answer_id AND direct_answer.question_id = q.id
+        ))
+    )";
 }
 
 /** Resolve an HR-authorized answer attachment without exposing its storage path. */
@@ -479,9 +780,22 @@ function assessment_review_private_file(int $reviewId, int $fileId): ?array
     $statement = db()->prepare(
         "SELECT f.stored_file_path, f.original_file_name, f.mime_type, f.file_size_bytes
          FROM assessment_reviews r
-         INNER JOIN attempt_answers aa ON aa.id = r.answer_id
-         INNER JOIN attempt_answer_files f ON f.answer_id = aa.id
-         WHERE r.id = :review_id AND f.id = :file_id LIMIT 1"
+         INNER JOIN attempt_answer_files f ON f.id = :file_id
+         INNER JOIN attempt_answers aa ON aa.id = f.answer_id
+         INNER JOIN question_bank q ON q.id = aa.question_id
+         INNER JOIN assessment_modules m ON m.id = aa.module_id
+         WHERE r.id = :review_id AND (
+             (r.review_type = 'papi' AND aa.attempt_id = r.attempt_id
+              AND q.question_type = 'forced_choice'
+              AND (q.papi_item_code IS NOT NULL OR q.category = 'PAPI_KOSTICK'))
+             OR (r.review_type = 'review_360' AND m.module_kind = 'review_360'
+                 AND EXISTS (
+                     SELECT 1 FROM attempt_answers review_anchor
+                     WHERE review_anchor.id = r.answer_id
+                       AND review_anchor.review_assignment_id = aa.review_assignment_id
+                 ))
+             OR (r.review_type NOT IN ('papi', 'review_360') AND r.answer_id = aa.id)
+         ) LIMIT 1"
     );
     $statement->execute(['review_id' => $reviewId, 'file_id' => $fileId]);
     $file = $statement->fetch();
@@ -510,33 +824,32 @@ function assessment_review_private_question_asset(int $reviewId, string $assetTy
     if ($reviewId < 1 || $recordId < 1) {
         return null;
     }
+    $questionScope = assessment_review_question_scope_sql();
     $statement = match ($assetType) {
         'question_image' => db()->prepare(
             "SELECT q.question_image_path AS stored_path,
                     COALESCE(NULLIF(q.question_image_alt, ''), 'question-image') AS original_file_name,
                     NULL AS mime_type
              FROM assessment_reviews r
-             INNER JOIN attempt_answers aa ON aa.id = r.answer_id
-             INNER JOIN question_bank q ON q.id = aa.question_id
-             WHERE r.id = :review_id AND q.id = :record_id LIMIT 1"
+             INNER JOIN question_bank q ON q.id = :record_id
+             WHERE r.id = :review_id AND q.question_image_path IS NOT NULL AND $questionScope LIMIT 1"
         ),
         'option_image' => db()->prepare(
             "SELECT qo.option_image_path AS stored_path,
                     CONCAT('option-', qo.option_key) AS original_file_name,
                     NULL AS mime_type
              FROM assessment_reviews r
-             INNER JOIN attempt_answers aa ON aa.id = r.answer_id
-             INNER JOIN question_options qo ON qo.question_id = aa.question_id
-             WHERE r.id = :review_id AND qo.id = :record_id LIMIT 1"
+             INNER JOIN question_options qo ON qo.id = :record_id
+             INNER JOIN question_bank q ON q.id = qo.question_id
+             WHERE r.id = :review_id AND qo.option_image_path IS NOT NULL AND $questionScope LIMIT 1"
         ),
         'reference' => db()->prepare(
             "SELECT q.reference_file_path AS stored_path,
                     COALESCE(NULLIF(q.reference_file_name, ''), 'reference-file') AS original_file_name,
                     q.reference_mime_type AS mime_type
              FROM assessment_reviews r
-             INNER JOIN attempt_answers aa ON aa.id = r.answer_id
-             INNER JOIN question_bank q ON q.id = aa.question_id
-             WHERE r.id = :review_id AND q.id = :record_id LIMIT 1"
+             INNER JOIN question_bank q ON q.id = :record_id
+             WHERE r.id = :review_id AND q.reference_file_path IS NOT NULL AND $questionScope LIMIT 1"
         ),
         default => null,
     };

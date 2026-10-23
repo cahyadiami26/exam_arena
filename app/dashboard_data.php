@@ -29,9 +29,22 @@ function app_dashboard_data(): array
         )->fetchColumn();
 
         $reviewSummary = $pdo->query(
-            "SELECT COUNT(*) AS total
-             FROM assessment_reviews
-             WHERE status IN ('pending', 'in_progress')"
+            "SELECT
+                (SELECT COUNT(*) FROM assessment_reviews
+                 WHERE status IN ('pending', 'in_progress')
+                   AND review_type NOT IN ('papi', 'review_360'))
+                + (SELECT COUNT(*) FROM (
+                    SELECT attempt_id FROM assessment_reviews
+                    WHERE review_type = 'papi' AND status IN ('pending', 'in_progress')
+                    GROUP BY attempt_id
+                ) AS pending_papi)
+                + (SELECT COUNT(*) FROM (
+                    SELECT r.attempt_id, COALESCE(aa.review_assignment_id, 0) AS assignment_key
+                    FROM assessment_reviews r
+                    LEFT JOIN attempt_answers aa ON aa.id = r.answer_id
+                    WHERE r.review_type = 'review_360' AND r.status IN ('pending', 'in_progress')
+                    GROUP BY r.attempt_id, COALESCE(aa.review_assignment_id, 0)
+                ) AS pending_360) AS total"
         )->fetch() ?: [];
 
         $review360 = $pdo->query(
@@ -67,21 +80,35 @@ function app_dashboard_data(): array
              LIMIT 5"
         )->fetchAll();
 
-        $reviews = $pdo->query(
-            "SELECT r.id, r.review_type, r.created_at,
+        $reviewRows = $pdo->query(
+            "SELECT r.id, r.review_type, r.status AS review_status, r.created_at,
                     a.id AS attempt_id, sp.participant_type, sp.sso_user_id,
                     ec.name AS candidate_name, s.name AS schedule_name,
-                    p.name AS package_name
+                    p.name AS package_name, aa.review_assignment_id, ra.subject_user_id
              FROM assessment_reviews r
              INNER JOIN exam_attempts a ON a.id = r.attempt_id
              INNER JOIN schedule_participants sp ON sp.id = a.schedule_participant_id
              INNER JOIN exam_schedules s ON s.id = sp.schedule_id
              INNER JOIN test_packages p ON p.id = s.package_id
              LEFT JOIN external_candidates ec ON ec.id = sp.candidate_id
+             LEFT JOIN attempt_answers aa ON aa.id = r.answer_id
+             LEFT JOIN review_assignments ra ON ra.id = aa.review_assignment_id
              WHERE r.status IN ('pending', 'in_progress')
-             ORDER BY r.created_at ASC
-             LIMIT 5"
+             ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END, r.created_at ASC, r.id ASC
+             LIMIT 10000"
         )->fetchAll();
+        $groupedReviews = [];
+        foreach ($reviewRows as $row) {
+            $groupKey = match ($row['review_type']) {
+                'papi' => 'papi:' . (int) $row['attempt_id'],
+                'review_360' => 'review_360:' . (int) $row['attempt_id'] . ':' . (int) ($row['review_assignment_id'] ?? 0),
+                default => 'review:' . (int) $row['id'],
+            };
+            if (!isset($groupedReviews[$groupKey])) {
+                $groupedReviews[$groupKey] = $row;
+            }
+        }
+        $reviews = array_slice(array_values($groupedReviews), 0, 5);
 
         $scheduleRows = $pdo->query(
             "SELECT s.id, s.name, s.code, s.starts_at, s.ends_at, s.status,
@@ -125,6 +152,9 @@ function app_dashboard_data(): array
             if (($row['participant_type'] ?? '') === 'employee' && !empty($row['sso_user_id'])) {
                 $employeeIds[] = (int) $row['sso_user_id'];
             }
+            if (!empty($row['subject_user_id'])) {
+                $employeeIds[] = (int) $row['subject_user_id'];
+            }
         }
         $employeeNames = [];
         $employeeIds = array_values(array_unique(array_filter($employeeIds)));
@@ -160,6 +190,8 @@ function app_dashboard_data(): array
             $row['participant_name'] = $row['participant_type'] === 'candidate'
                 ? ($row['candidate_name'] ?: 'Calon karyawan')
                 : ($employeeNames[$ssoId]['name'] ?? ('Peserta karyawan #' . $ssoId));
+            $subjectId = (int) ($row['subject_user_id'] ?? 0);
+            $row['subject_name'] = $employeeNames[$subjectId]['name'] ?? ($subjectId > 0 ? 'Karyawan #' . $subjectId : '');
         }
         unset($row);
 

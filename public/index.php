@@ -413,12 +413,12 @@ $passRate = $stats['pass_rate'] ?? null;
                                 <div class="panel-heading side-panel-heading"><div><h2>Tindakan HR</h2><p>Prioritas yang membutuhkan tindak lanjut</p></div><span class="attention-count"><?= $databaseOnline ? dashboard_number($stats['pending_reviews'] ?? 0) : '—' ?><small> review</small></span></div>
                                 <div class="action-list">
                                     <?php if (!$databaseOnline || empty($data['reviews'])): ?>
-                                        <div class="empty-state compact-empty action-empty"><div class="empty-icon"><svg class="icon"><use href="#i-check"></use></svg></div><div><strong><?= $databaseOnline ? 'Antrean review bersih' : 'Antrean belum tersedia' ?></strong><p><?= $databaseOnline ? 'Tidak ada penilaian manual yang menunggu.' : 'Hubungkan database untuk memuat antrean.' ?></p></div></div>
+                                        <div class="empty-state compact-empty action-empty"><div class="empty-icon"><svg class="icon"><use href="#i-check"></use></svg></div><div><strong><?= $databaseOnline ? 'Antrean review bersih' : 'Antrean belum tersedia' ?></strong><p><?= $databaseOnline ? 'Tidak ada review HR yang menunggu.' : 'Hubungkan database untuk memuat antrean.' ?></p></div></div>
                                     <?php else: ?>
                                         <?php foreach (array_slice($data['reviews'], 0, 3) as $review): ?>
                                             <a class="action-card" href="admin/reviews.php?id=<?= (int) $review['id'] ?>#review-detail">
                                                 <span class="action-icon <?= $review['review_type'] === 'papi' || $review['review_type'] === 'psychometric' ? 'action-icon-amber' : 'action-icon-rose' ?>"><svg class="icon"><use href="#i-<?= in_array($review['review_type'], ['papi', 'psychometric'], true) ? 'activity' : 'file' ?>"></use></svg></span>
-                                                <span class="action-card-copy"><strong><?= e(dashboard_review_label((string) $review['review_type'])) ?> · <?= e($review['participant_name']) ?></strong><span><?= e($review['package_name']) ?></span><small><?= e($review['schedule_name']) ?></small><em>Buka item penilaian <span>→</span></em></span>
+                                                <span class="action-card-copy"><strong><?= e(dashboard_review_label((string) $review['review_type'])) ?> · <?= e($review['participant_name']) ?><?= !empty($review['subject_name']) ? ' → ' . e($review['subject_name']) : '' ?></strong><span><?= e($review['package_name']) ?></span><small><?= e($review['schedule_name']) ?></small><em>Buka review <span>→</span></em></span>
                                             </a>
                                         <?php endforeach; ?>
                                     <?php endif; ?>
