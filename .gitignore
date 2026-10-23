@@ -1,0 +1,16 @@
+# Local secrets and machine-specific configuration
+/.env
+/config/local.php
+
+# Private user uploads, exports, and generated reports
+/storage/*
+!/storage/.gitkeep
+
+# Manually installed third-party PDF library and transient installer staging
+/lib/dompdf/
+/lib/.dompdf-stage.*/
+
+# Common editor/OS files
+.DS_Store
+.idea/
+.vscode/
