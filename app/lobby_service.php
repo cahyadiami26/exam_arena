@@ -190,39 +190,75 @@ function lobby_attach_modules(array $assignments): array
 }
 
 /**
- * Evaluate the schedule window and retry policy. This controls the lobby CTA;
- * the execution endpoint must repeat the same checks server-side when it is added.
+ * Evaluate the schedule window and retry policy for the lobby CTA.
+ * exam_start_attempt() repeats the authorization and schedule checks server-side.
  */
-function lobby_start_state(array $assignment): array
+function lobby_start_state(array $assignment, ?int $now = null): array
 {
-    $now = time();
+    $now ??= time();
+    $scheduleStatus = (string) ($assignment['schedule_status'] ?? '');
     $startsAt = strtotime((string) ($assignment['starts_at'] ?? '')) ?: 0;
     $endsAt = strtotime((string) ($assignment['ends_at'] ?? '')) ?: 0;
-    $inWindow = $assignment['schedule_status'] === 'open' && $startsAt <= $now && $endsAt >= $now;
+    $inWindow = $scheduleStatus === 'open' && $startsAt > 0 && $startsAt <= $now && $endsAt >= $now;
     $attemptCount = (int) ($assignment['attempt_count'] ?? 0);
     $latestStatus = (string) ($assignment['latest_attempt_status'] ?? '');
     $maxAttempts = max(1, (int) ($assignment['max_attempts'] ?? 1));
     $allowRetake = (bool) ($assignment['allow_retake'] ?? false);
 
-    if ($assignment['package_status'] !== 'published') {
-        return ['available' => false, 'in_window' => $inWindow, 'reason' => 'Paket ujian belum diterbitkan.'];
+    if (($assignment['package_status'] ?? '') !== 'published') {
+        return [
+            'available' => false,
+            'in_window' => $inWindow,
+            'reason_code' => 'package_unpublished',
+            'reason' => 'Paket ujian belum diterbitkan.',
+        ];
     }
     if (!$inWindow) {
-        if ($assignment['schedule_status'] === 'scheduled' || $startsAt > $now) {
-            $reason = 'Tombol mulai akan aktif saat jadwal dibuka.';
+        if ($scheduleStatus === 'closed') {
+            $reasonCode = 'closed';
+            $reason = 'Jadwal ujian ditutup oleh HR.';
+        } elseif ($scheduleStatus === 'open' && $startsAt > $now) {
+            $reasonCode = 'not_started';
+            $reason = 'Waktu mulai ujian belum tiba.';
+        } elseif ($scheduleStatus === 'scheduled' && $startsAt > $now) {
+            $reasonCode = 'scheduled_upcoming';
+            $reason = 'Jadwal masih menunggu dibuka oleh HR.';
         } elseif ($endsAt > 0 && $endsAt < $now) {
+            $reasonCode = 'ended';
             $reason = 'Waktu pelaksanaan ujian telah berakhir.';
         } else {
+            $reasonCode = 'not_open';
             $reason = 'Jadwal ujian belum dibuka oleh HR.';
         }
-        return ['available' => false, 'in_window' => false, 'reason' => $reason];
+
+        return [
+            'available' => false,
+            'in_window' => false,
+            'reason_code' => $reasonCode,
+            'reason' => $reason,
+        ];
     }
     if ($latestStatus === 'in_progress') {
-        return ['available' => true, 'in_window' => true, 'reason' => 'Sesi ujian sedang berlangsung.'];
+        return [
+            'available' => true,
+            'in_window' => true,
+            'reason_code' => 'in_progress',
+            'reason' => 'Sesi ujian sedang berlangsung.',
+        ];
     }
     if ($attemptCount > 0 && (!$allowRetake || $attemptCount >= $maxAttempts)) {
-        return ['available' => false, 'in_window' => true, 'reason' => 'Kesempatan ujian telah digunakan.'];
+        return [
+            'available' => false,
+            'in_window' => true,
+            'reason_code' => 'attempt_limit',
+            'reason' => 'Kesempatan ujian telah digunakan.',
+        ];
     }
 
-    return ['available' => true, 'in_window' => true, 'reason' => 'Jadwal sedang dibuka. Periksa perangkat sebelum memulai.'];
+    return [
+        'available' => true,
+        'in_window' => true,
+        'reason_code' => 'ready',
+        'reason' => 'Jadwal sedang dibuka. Periksa perangkat sebelum memulai.',
+    ];
 }

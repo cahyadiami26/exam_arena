@@ -131,9 +131,37 @@ function lobby_module_count(array $module): int
 
 function lobby_render_assignment(array $assignment, string $identityType): void
 {
-    $state = lobby_start_state($assignment);
+    $now = time();
+    $state = lobby_start_state($assignment, $now);
     $isContinuing = ($assignment['latest_attempt_status'] ?? '') === 'in_progress';
     $status = (string) ($assignment['schedule_status'] ?? 'scheduled');
+    $startsAtTimestamp = strtotime((string) ($assignment['starts_at'] ?? '')) ?: 0;
+    $endsAtTimestamp = strtotime((string) ($assignment['ends_at'] ?? '')) ?: 0;
+    $displayStatus = $status;
+    if ($status === 'open' && $startsAtTimestamp > $now) {
+        $displayStatus = 'upcoming';
+    } elseif ($status === 'open' && $endsAtTimestamp > 0 && $endsAtTimestamp < $now) {
+        $displayStatus = 'ended';
+    }
+    $statusClass = match ($displayStatus) {
+        'open' => 'is-open',
+        'closed', 'ended', 'archived' => 'is-closed',
+        default => 'is-scheduled',
+    };
+    $statusLabel = match ($displayStatus) {
+        'open' => 'Jadwal dibuka',
+        'upcoming' => 'Belum dimulai',
+        'closed' => 'Ditutup',
+        'ended' => 'Berakhir',
+        'archived' => 'Diarsipkan',
+        default => 'Terjadwal',
+    };
+    $startReason = $state['reason'];
+    if ($state['reason_code'] === 'not_started') {
+        $startReason = 'Jadwal dibuka oleh HR, tetapi ujian baru dimulai ' . lobby_human_date((string) $assignment['starts_at']) . '. Muat ulang Lobby setelah waktu mulai.';
+    } elseif ($state['reason_code'] === 'scheduled_upcoming') {
+        $startReason = 'Jadwal dimulai ' . lobby_human_date((string) $assignment['starts_at']) . ' dan masih menunggu dibuka oleh HR. Muat ulang Lobby setelah jadwal dibuka.';
+    }
     $modeName = $identityType === 'candidate' ? 'Token Kandidat' : 'Akun SSO';
     ?>
     <article class="exam-card">
@@ -144,7 +172,7 @@ function lobby_render_assignment(array $assignment, string $identityType): void
                 <h3><?= e($assignment['schedule_name']) ?></h3>
                 <p><?= e($assignment['package_name']) ?></p>
             </div>
-            <span class="schedule-status <?= $status === 'open' ? 'is-open' : ($status === 'closed' ? 'is-closed' : 'is-scheduled') ?>"><i></i><?= $status === 'open' ? 'Jadwal dibuka' : ($status === 'closed' ? 'Ditutup' : 'Terjadwal') ?></span>
+            <span class="schedule-status <?= e($statusClass) ?>"><i></i><?= e($statusLabel) ?></span>
         </div>
         <div class="exam-summary-grid">
             <div class="exam-summary-cell"><span class="summary-label"><svg class="icon"><use href="#l-icon-calendar"></use></svg>WAKTU PELAKSANAAN</span><strong><?= e(lobby_human_date((string) $assignment['starts_at'])) ?></strong><small>Sampai <?= e(lobby_human_date((string) $assignment['ends_at'])) ?></small></div>
@@ -192,7 +220,7 @@ function lobby_render_assignment(array $assignment, string $identityType): void
                     <button type="submit" class="button button-start-exam" data-start-exam disabled><?= $isContinuing ? 'Lanjutkan Ujian' : 'Mulai Ujian' ?><svg class="icon"><use href="#l-icon-arrow"></use></svg></button>
                 </form>
             </div>
-            <p class="start-reason" data-start-reason><?= e($state['reason']) ?></p>
+            <p class="start-reason" data-start-reason><?= e($startReason) ?></p>
             <p class="exam-stage-note" data-exam-stage-note hidden>Pemeriksaan berhasil. Anda dapat melanjutkan ke ruang pengerjaan ujian.</p>
         </div>
     </article>

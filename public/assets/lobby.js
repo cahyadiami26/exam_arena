@@ -161,7 +161,8 @@
             }
             updateStartButton();
             if (cameraPassed && networkPassed && panel.dataset.startAvailable !== '1') {
-                showToast('Perangkat siap. Tombol ujian akan aktif saat jadwal dibuka oleh HR.');
+                const scheduleMessage = reason?.textContent?.trim();
+                showToast(scheduleMessage ? `Perangkat siap. ${scheduleMessage}` : 'Perangkat siap, tetapi ujian belum dapat dimulai.');
             } else if (cameraPassed && networkPassed) {
                 showToast('Pemeriksaan webcam dan koneksi berhasil.');
             }

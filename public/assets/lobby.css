@@ -102,7 +102,7 @@
 .exam-code i { padding: 0 3px; color: #b5bdc9; font-style: normal; }
 .exam-title-wrap h3 { margin: 4px 0 3px; color: #1e2c47; font-size: 12px; font-weight: 750; line-height: 1.35; }
 .exam-title-wrap p { margin: 0; color: #7d8799; font-size: 8px; }
-.schedule-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; border-radius: 999px; padding: 5px 8px; font-size: 7px; font-weight: 750; white-space: nowrap; }
+.schedule-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; border-radius: 999px; padding: 6px 9px; font-size: 10px; font-weight: 750; white-space: nowrap; }
 .schedule-status i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .schedule-status.is-open { background: #e9f7f0; color: #24785b; }
 .schedule-status.is-scheduled { background: #edf2fb; color: #526c92; }
@@ -159,7 +159,7 @@
 .button-start-exam { border-color: #a45b10; background: #a45b10; color: #fff; }
 .button-start-exam:disabled { border-color: #e2e5eb; background: #e6e9ee; color: #939bab; cursor: not-allowed; box-shadow: none; transform: none; }
 .button-device-check .icon, .button-start-exam .icon { width: 13px; height: 13px; }
-.start-reason { margin: 8px 0 0; color: #8b95a6; font-size: 7px; line-height: 1.45; }
+.start-reason { margin: 8px 0 0; color: #66728a; font-size: 11px; line-height: 1.55; }
 .exam-stage-note { margin: 7px 0 0; border-left: 2px solid #b87925; padding-left: 7px; color: #896331; font-size: 7px; line-height: 1.45; }
 .exam-stage-note[hidden] { display: none; }
 .form-alert { margin-bottom: 12px; border: 1px solid #f0d1d2; border-radius: 8px; background: #fff5f5; padding: 9px 11px; color: #a23f47; font-size: 8px; line-height: 1.45; }
