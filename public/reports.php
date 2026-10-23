@@ -143,6 +143,35 @@ function report_page_csv_number(mixed $value): string
     return $value === null ? '' : number_format((float) $value, 2, '.', '');
 }
 
+/** Fail clearly when reports.php and its included service files are from different releases. */
+function report_page_require_service_functions(): void
+{
+    $requiredFunctions = [
+        'assessment_report_filters',
+        'assessment_report_package_options',
+        'assessment_report_schedule_options',
+        'assessment_report_aggregate',
+        'assessment_report_hr_attempts',
+        'assessment_report_hr_complete_attempts',
+        'assessment_report_hr_papi_profiles',
+        'assessment_report_hr_papi_review_summaries',
+        'assessment_report_management_packages',
+        'assessment_report_csv_safe_text',
+        'assessment_papi_profile_svg',
+    ];
+    $missingFunctions = array_values(array_filter(
+        $requiredFunctions,
+        static fn (string $functionName): bool => !function_exists($functionName)
+    ));
+    if ($missingFunctions !== []) {
+        error_log('E-Assessment reports dependency mismatch; missing functions: ' . implode(', ', $missingFunctions));
+        http_response_code(500);
+        exit('Komponen laporan belum lengkap atau versinya tidak sinkron. Unggah bersama public/reports.php, app/report_service.php, dan app/papi_profile_service.php.');
+    }
+}
+
+report_page_require_service_functions();
+
 $filterError = null;
 try {
     $filters = assessment_report_filters($_GET, $isManagementView);
@@ -258,14 +287,21 @@ $managementPackages = [];
 $schedules = [];
 $packages = [];
 $databaseError = null;
+$reportLoadStage = 'memuat daftar paket';
 try {
     $packages = assessment_report_package_options();
     if ($isHr) {
+        $reportLoadStage = 'memuat daftar jadwal';
         $schedules = assessment_report_schedule_options();
+        $reportLoadStage = 'menghitung ringkasan HR';
         $summary = assessment_report_aggregate($filters, true);
+        $reportLoadStage = 'memuat rincian attempt dan review HR';
         $attemptRows = assessment_report_hr_complete_attempts($filters, 500);
+        $reportLoadStage = 'memuat profil PAPI';
         $papiProfiles = assessment_report_hr_papi_profiles($filters, 50);
+        $reportLoadStage = 'memuat hasil review PAPI';
         $papiReviewSummaries = assessment_report_hr_papi_review_summaries(array_column($papiProfiles, 'attempt_id'));
+        $reportLoadStage = 'menyusun grafik PAPI';
         foreach ($papiProfiles as &$profile) {
             $attemptId = (int) $profile['attempt_id'];
             $profile['chart_svg'] = assessment_papi_profile_svg($profile['scores']);
@@ -273,12 +309,24 @@ try {
         }
         unset($profile);
     } else {
+        $reportLoadStage = 'menghitung ringkasan manajemen';
         $summary = assessment_report_aggregate($filters, false);
+        $reportLoadStage = 'memuat agregat per paket';
         $managementPackages = assessment_report_management_packages($filters);
     }
 } catch (Throwable $exception) {
-    error_log('E-Assessment report page load failed: ' . $exception->getMessage());
-    $databaseError = 'Laporan belum dapat dimuat. Pastikan database aplikasi, skema, dan koneksi SSO tersedia.';
+    error_log(
+        'E-Assessment report page load failed at [' . $reportLoadStage . '] '
+        . get_class($exception) . ': ' . $exception->getMessage()
+    );
+    if ($exception instanceof LogicException
+        || ($exception instanceof Error && str_contains(strtolower($exception->getMessage()), 'undefined function'))) {
+        $databaseError = 'Komponen laporan belum lengkap atau versinya tidak sinkron. Pastikan public/reports.php, app/report_service.php, dan app/papi_profile_service.php berasal dari rilis yang sama.';
+    } elseif ($exception instanceof PDOException) {
+        $databaseError = 'Laporan gagal membaca data pada tahap ' . $reportLoadStage . '. Periksa koneksi database, pembaruan database/schema.sql, hak akses database, dan error_log server.';
+    } else {
+        $databaseError = 'Laporan gagal dimuat pada tahap ' . $reportLoadStage . '. Periksa error_log server untuk detail teknis.';
+    }
     $summary = [
         'attempt_count' => 0,
         'participant_count' => 0,
