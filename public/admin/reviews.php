@@ -256,8 +256,10 @@ $inputValue = static function (string $field, mixed $stored = null) use ($formIn
     <title>Portal Penilai HR · E-Assessment LJU</title>
     <link rel="stylesheet" href="../assets/assessment-builder.css?v=1">
     <link rel="stylesheet" href="../assets/reviews.css?v=1">
+    <link rel="stylesheet" href="../assets/portal-ui.css?v=1">
+    <script src="../assets/portal-ui.js?v=1" defer></script>
 </head>
-<body class="assessment-builder-page review-page">
+<body class="assessment-builder-page review-page has-portal-sidebar">
 <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="rv-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
     <symbol id="rv-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></symbol>
@@ -268,6 +270,7 @@ $inputValue = static function (string $field, mixed $stored = null) use ($formIn
     <symbol id="rv-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
     <symbol id="rv-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
 </svg>
+<?php $portalNavBase = '../'; $portalNavActive = 'reviews'; require dirname(__DIR__, 2) . '/app/portal_sidebar.php'; ?>
 <header class="ab-topbar">
     <a class="ab-brand" href="../index.php" aria-label="Kembali ke dashboard HR">
         <span class="ab-brand-mark"><img src="../assets/logo-lju.svg" alt="" onerror="this.parentElement.classList.add('logo-failed')"><b class="ab-brand-fallback">LJU</b></span>

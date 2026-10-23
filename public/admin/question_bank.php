@@ -159,9 +159,11 @@ $avatarUrl = app_avatar_url();
     <title>Bank Soal · E-Assessment LJU</title>
     <link rel="stylesheet" href="../assets/app.css?v=1">
     <link rel="stylesheet" href="../assets/question-bank.css?v=1">
+    <link rel="stylesheet" href="../assets/portal-ui.css?v=1">
     <script src="../assets/question-bank.js?v=1" defer></script>
+    <script src="../assets/portal-ui.js?v=1" defer></script>
 </head>
-<body class="question-bank-page">
+<body class="question-bank-page has-portal-sidebar">
 <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="qb-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></symbol>
     <symbol id="qb-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></symbol>
@@ -174,6 +176,7 @@ $avatarUrl = app_avatar_url();
     <symbol id="qb-warning" viewBox="0 0 24 24"><path d="M10.3 3.9 2.5 17.4A2 2 0 0 0 4.2 20h15.6a2 2 0 0 0 1.7-2.6L13.7 3.9a2 2 0 0 0-3.4 0ZM12 9v4M12 17h.01"/></symbol>
     <symbol id="qb-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
 </svg>
+<?php $portalNavBase = '../'; $portalNavActive = 'questions'; require dirname(__DIR__, 2) . '/app/portal_sidebar.php'; ?>
 
 <header class="qb-topbar">
     <a class="qb-brand" href="../index.php" aria-label="Kembali ke Dashboard E-Assessment">

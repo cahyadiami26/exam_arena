@@ -208,9 +208,11 @@ function lobby_render_assignment(array $assignment, string $identityType): void
     <title>Lobby Ujian · E-Assessment LJU</title>
     <link rel="stylesheet" href="assets/app.css?v=1">
     <link rel="stylesheet" href="assets/lobby.css?v=1">
+    <link rel="stylesheet" href="assets/portal-ui.css?v=1">
     <script src="assets/lobby.js?v=1" defer></script>
+    <script src="assets/portal-ui.js?v=1" defer></script>
 </head>
-<body class="lobby-page">
+<body class="lobby-page has-portal-sidebar">
 <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="l-icon-building" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h.01M15 10h.01M9 14h.01M15 14h.01M10 21v-4h4v4"/></symbol>
     <symbol id="l-icon-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></symbol>
@@ -231,6 +233,7 @@ function lobby_render_assignment(array $assignment, string $identityType): void
     <symbol id="l-icon-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9a2.5 2.5 0 1 1 4.1 1.9c-1 .8-1.7 1.1-1.7 2.6M12 17h.01"/></symbol>
     <symbol id="l-icon-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l3-3A5 5 0 0 0 13 2.9l-1.7 1.7M14 11a5 5 0 0 0-7.1 0l-3 3A5 5 0 0 0 11 21.1l1.7-1.7"/></symbol>
 </svg>
+<?php $portalNavBase = ''; $portalNavActive = 'lobby'; require dirname(__DIR__) . '/app/portal_sidebar.php'; ?>
 
 <header class="lobby-topbar">
     <a class="lobby-brand" href="lobby.php" aria-label="E-Assessment LJU">

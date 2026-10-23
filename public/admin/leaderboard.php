@@ -73,8 +73,10 @@ $avatarUrl = app_avatar_url();
     <title>Leaderboard · E-Assessment LJU</title>
     <link rel="stylesheet" href="../assets/assessment-builder.css?v=1">
     <link rel="stylesheet" href="../assets/leaderboard.css?v=1">
+    <link rel="stylesheet" href="../assets/portal-ui.css?v=1">
+    <script src="../assets/portal-ui.js?v=1" defer></script>
 </head>
-<body class="assessment-builder-page leaderboard-page">
+<body class="assessment-builder-page leaderboard-page has-portal-sidebar">
 <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="lb-chart" viewBox="0 0 24 24"><path d="M3 3v18h18M7 14l4-4 4 3 6-7M17 6h4v4"/></symbol>
     <symbol id="lb-award" viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/><path d="m8.2 13-1.1 9 4.9-2.7 4.9 2.7-1.1-9"/></symbol>
@@ -83,6 +85,7 @@ $avatarUrl = app_avatar_url();
     <symbol id="lb-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
     <symbol id="lb-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
 </svg>
+<?php $portalNavBase = '../'; $portalNavActive = 'leaderboard'; require dirname(__DIR__, 2) . '/app/portal_sidebar.php'; ?>
 <header class="ab-topbar">
     <a class="ab-brand" href="../index.php" aria-label="Kembali ke dashboard HR">
         <span class="ab-brand-mark"><img src="../assets/logo-lju.svg" alt="" onerror="this.parentElement.classList.add('logo-failed')"><b class="ab-brand-fallback">LJU</b></span>

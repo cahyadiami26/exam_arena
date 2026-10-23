@@ -249,8 +249,10 @@ $papiReportExportUrl = 'reports.php?' . http_build_query([
     <title>Laporan &amp; Hasil · E-Assessment LJU</title>
     <link rel="stylesheet" href="assets/assessment-builder.css?v=1">
     <link rel="stylesheet" href="assets/reports.css?v=1">
+    <link rel="stylesheet" href="assets/portal-ui.css?v=1">
+    <script src="assets/portal-ui.js?v=1" defer></script>
 </head>
-<body class="assessment-builder-page report-page">
+<body class="assessment-builder-page report-page has-portal-sidebar">
 <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <symbol id="rp-chart" viewBox="0 0 24 24"><path d="M3 3v18h18M7 14l4-4 4 3 6-7M17 6h4v4"/></symbol>
     <symbol id="rp-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM20 8a3 3 0 0 1-2 2.83M20 21v-2a4 4 0 0 0-3-3.87"/></symbol>
@@ -260,6 +262,7 @@ $papiReportExportUrl = 'reports.php?' . http_build_query([
     <symbol id="rp-pdf" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h2a1.5 1.5 0 0 1 0 3H8v-3ZM13 16v-3h1.5a1.5 1.5 0 0 1 0 3H13ZM18 13h-2v3M16 14.5h1.5"/></symbol>
     <symbol id="rp-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
 </svg>
+<?php $portalNavBase = ''; $portalNavActive = 'reports'; require dirname(__DIR__) . '/app/portal_sidebar.php'; ?>
 <header class="ab-topbar">
     <a class="ab-brand" href="index.php" aria-label="Kembali ke dashboard">
         <span class="ab-brand-mark"><img src="assets/logo-lju.svg" alt="" onerror="this.parentElement.classList.add('logo-failed')"><b class="ab-brand-fallback">LJU</b></span>

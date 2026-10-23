@@ -84,25 +84,25 @@ function dashboard_module_label(string $category): string
 $navItems = [];
 if ($isHr) {
     $navItems = [
-        ['icon' => 'overview', 'label' => 'Dashboard Utama HR', 'tag' => 'Overview', 'active' => true],
-        ['icon' => 'door', 'label' => 'Lobby Ujian', 'tag' => 'Peserta'],
-        ['icon' => 'layers', 'label' => 'Bank Soal & Paket', 'href' => 'admin/question_bank.php'],
+        ['icon' => 'overview', 'label' => 'Dashboard HR', 'tag' => 'Overview', 'active' => true],
+        ['icon' => 'door', 'label' => 'Lobby Ujian', 'href' => 'lobby.php'],
+        ['icon' => 'layers', 'label' => 'Bank Soal', 'href' => 'admin/question_bank.php'],
+        ['icon' => 'book', 'label' => 'Assessment Studio', 'href' => 'admin/assessment_builder.php?view=modules'],
         ['icon' => 'calendar', 'label' => 'Jadwal & Undangan', 'href' => 'admin/schedules.php'],
-        ['icon' => 'clipboard', 'label' => 'Portal Penilai HR', 'tag' => 'Review', 'href' => 'admin/reviews.php'],
+        ['icon' => 'clipboard', 'label' => 'Portal Penilai HR', 'href' => 'admin/reviews.php'],
         ['icon' => 'chart', 'label' => 'Laporan & Hasil', 'href' => 'reports.php'],
-        ['icon' => 'users', 'label' => 'Evaluasi 360°'],
+        ['icon' => 'chart', 'label' => 'Leaderboard', 'href' => 'admin/leaderboard.php'],
     ];
 } elseif ($isManagement) {
     $navItems = [
         ['icon' => 'overview', 'label' => 'Ringkasan Manajemen', 'tag' => 'Overview', 'active' => true],
+        ['icon' => 'door', 'label' => 'Lobby Ujian', 'href' => 'lobby.php'],
         ['icon' => 'chart', 'label' => 'Laporan & Hasil', 'href' => 'reports.php'],
-        ['icon' => 'users', 'label' => 'Evaluasi 360°'],
     ];
 } else {
     $navItems = [
         ['icon' => 'overview', 'label' => 'Beranda Peserta', 'tag' => 'SSO', 'active' => true],
-        ['icon' => 'door', 'label' => 'Ruang Ujian', 'tag' => 'Jadwal'],
-        ['icon' => 'file', 'label' => 'Riwayat Hasil'],
+        ['icon' => 'door', 'label' => 'Lobby Ujian', 'href' => 'lobby.php'],
     ];
 }
 
@@ -121,6 +121,7 @@ $passRate = $stats['pass_rate'] ?? null;
     <meta name="theme-color" content="#f5f7fb">
     <title><?= e($isHr ? 'Dashboard HR' : ($isManagement ? 'Ringkasan Manajemen' : 'Beranda Peserta')) ?> · E-Assessment LJU</title>
     <link rel="stylesheet" href="assets/app.css?v=1">
+    <link rel="stylesheet" href="assets/portal-ui.css?v=1">
     <script src="assets/app.js?v=1" defer></script>
 </head>
 <body class="<?= $isParticipant ? 'participant-mode' : 'dashboard-mode' ?>">
